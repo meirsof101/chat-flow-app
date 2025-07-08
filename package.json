@@ -1,0 +1,18 @@
+{
+  "name": "web-sockets-assignment",
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter client run dev\" \"pnpm --filter server run dev\""
+  }
+}
+{
+  "name": "web-sockets-assignment",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter client run dev\" \"pnpm --filter server run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.0.0"
+  }
+}
+

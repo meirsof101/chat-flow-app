@@ -1,132 +1,124 @@
-// server.js - Main server file for Socket.io chat application
-
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
+const socketIo = require('socket.io');
 const cors = require('cors');
-const dotenv = require('dotenv');
-const path = require('path');
+require('dotenv').config();
 
-// Load environment variables
-dotenv.config();
-
-// Initialize Express app
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
+
+// Configure Socket.IO with CORS
+const io = socketIo(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
-    methods: ['GET', 'POST'],
-    credentials: true,
-  },
+    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    methods: ["GET", "POST"]
+  }
 });
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
 
-// Store connected users and messages
-const users = {};
-const messages = [];
-const typingUsers = {};
+// Store connected users
+const connectedUsers = new Map();
 
-// Socket.io connection handler
+// Socket.IO connection handling
 io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  console.log('New client connected:', socket.id);
 
   // Handle user joining
-  socket.on('user_join', (username) => {
-    users[socket.id] = { username, id: socket.id };
-    io.emit('user_list', Object.values(users));
-    io.emit('user_joined', { username, id: socket.id });
-    console.log(`${username} joined the chat`);
+  socket.on('join', (userData) => {
+    console.log('User joined:', userData);
+    
+    // Store user information
+    connectedUsers.set(socket.id, {
+      id: socket.id,
+      username: userData.username,
+      joinedAt: new Date()
+    });
+
+    // Notify all clients about the new user
+    socket.broadcast.emit('user_joined', {
+      username: userData.username,
+      message: `${userData.username} has joined the chat`
+    });
+
+    // Send current online users to the new user
+    const onlineUsers = Array.from(connectedUsers.values());
+    socket.emit('online_users', onlineUsers);
+    
+    // Broadcast updated online users list
+    io.emit('users_update', onlineUsers);
   });
 
   // Handle chat messages
   socket.on('send_message', (messageData) => {
-    const message = {
-      ...messageData,
-      id: Date.now(),
-      sender: users[socket.id]?.username || 'Anonymous',
-      senderId: socket.id,
-      timestamp: new Date().toISOString(),
-    };
-    
-    messages.push(message);
-    
-    // Limit stored messages to prevent memory issues
-    if (messages.length > 100) {
-      messages.shift();
-    }
-    
-    io.emit('receive_message', message);
-  });
-
-  // Handle typing indicator
-  socket.on('typing', (isTyping) => {
-    if (users[socket.id]) {
-      const username = users[socket.id].username;
+    const user = connectedUsers.get(socket.id);
+    if (user) {
+      const message = {
+        id: Date.now(),
+        username: user.username,
+        message: messageData.message,
+        timestamp: new Date(),
+        socketId: socket.id
+      };
       
-      if (isTyping) {
-        typingUsers[socket.id] = username;
-      } else {
-        delete typingUsers[socket.id];
-      }
+      console.log('Message received:', message);
       
-      io.emit('typing_users', Object.values(typingUsers));
+      // Broadcast message to all clients
+      io.emit('receive_message', message);
     }
   });
 
-  // Handle private messages
-  socket.on('private_message', ({ to, message }) => {
-    const messageData = {
-      id: Date.now(),
-      sender: users[socket.id]?.username || 'Anonymous',
-      senderId: socket.id,
-      message,
-      timestamp: new Date().toISOString(),
-      isPrivate: true,
-    };
-    
-    socket.to(to).emit('private_message', messageData);
-    socket.emit('private_message', messageData);
+  // Handle typing indicators
+  socket.on('typing', (data) => {
+    const user = connectedUsers.get(socket.id);
+    if (user) {
+      socket.broadcast.emit('user_typing', {
+        username: user.username,
+        isTyping: data.isTyping
+      });
+    }
   });
 
   // Handle disconnection
   socket.on('disconnect', () => {
-    if (users[socket.id]) {
-      const { username } = users[socket.id];
-      io.emit('user_left', { username, id: socket.id });
-      console.log(`${username} left the chat`);
+    console.log('Client disconnected:', socket.id);
+    
+    const user = connectedUsers.get(socket.id);
+    if (user) {
+      // Remove user from connected users
+      connectedUsers.delete(socket.id);
+      
+      // Notify all clients about user leaving
+      socket.broadcast.emit('user_left', {
+        username: user.username,
+        message: `${user.username} has left the chat`
+      });
+      
+      // Broadcast updated online users list
+      const onlineUsers = Array.from(connectedUsers.values());
+      io.emit('users_update', onlineUsers);
     }
-    
-    delete users[socket.id];
-    delete typingUsers[socket.id];
-    
-    io.emit('user_list', Object.values(users));
-    io.emit('typing_users', Object.values(typingUsers));
   });
 });
 
-// API routes
-app.get('/api/messages', (req, res) => {
-  res.json(messages);
-});
-
-app.get('/api/users', (req, res) => {
-  res.json(Object.values(users));
-});
-
-// Root route
+// Basic route for testing
 app.get('/', (req, res) => {
-  res.send('Socket.io Chat Server is running');
+  res.json({ message: 'Chat server is running!' });
 });
 
-// Start server
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    connectedUsers: connectedUsers.size,
+    timestamp: new Date()
+  });
+});
+
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Socket.IO server ready for connections`);
 });
-
-module.exports = { app, server, io }; 
