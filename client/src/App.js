@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import io from 'socket.io-client';
-import './App.css';
+// Browser-compatible version of your React chat app
+const { useState, useEffect, useRef } = React;
 
 // Connect to the server
-const socket = io(process.env.REACT_APP_SERVER_URL || 'http://localhost:5000');
+const socket = io('http://localhost:5000');
 
 function App() {
   const [username, setUsername] = useState('');
@@ -141,101 +140,89 @@ function App() {
   };
 
   if (!isJoined) {
-    return (
-      <div className="app">
-        <div className="join-container">
-          <div className="join-form">
-            <h2>Join Chat</h2>
-            <form onSubmit={joinChat}>
-              <input
-                type="text"
-                placeholder="Enter your username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                maxLength={20}
-                required
-              />
-              <button type="submit" disabled={!isConnected}>
-                {isConnected ? 'Join Chat' : 'Connecting...'}
-              </button>
-            </form>
-            <div className="connection-status">
-              Status: {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
-            </div>
-          </div>
-        </div>
-      </div>
+    return React.createElement('div', { className: 'app' },
+      React.createElement('div', { className: 'join-container' },
+        React.createElement('div', { className: 'join-form' },
+          React.createElement('h2', null, 'Join Chat'),
+          React.createElement('form', { onSubmit: joinChat },
+            React.createElement('input', {
+              type: 'text',
+              placeholder: 'Enter your username',
+              value: username,
+              onChange: (e) => setUsername(e.target.value),
+              maxLength: 20,
+              required: true
+            }),
+            React.createElement('button', {
+              type: 'submit',
+              disabled: !isConnected
+            }, isConnected ? 'Join Chat' : 'Connecting...')
+          ),
+          React.createElement('div', { className: 'connection-status' },
+            `Status: ${isConnected ? '🟢 Connected' : '🔴 Disconnected'}`
+          )
+        )
+      )
     );
   }
 
-  return (
-    <div className="app">
-      <div className="chat-container">
-        <div className="chat-header">
-          <h2>Real-Time Chat</h2>
-          <div className="header-info">
-            <span className="username">Welcome, {username}!</span>
-            <span className="connection-status">
-              {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
-            </span>
-          </div>
-        </div>
-
-        <div className="chat-body">
-          <div className="messages-container">
-            <div className="messages">
-              {messages.map((msg) => (
-                <div 
-                  key={msg.id} 
-                  className={`message ${msg.isSystem ? 'system-message' : ''} ${msg.username === username ? 'own-message' : ''}`}
-                >
-                  {!msg.isSystem && (
-                    <div className="message-header">
-                      <span className="message-username">{msg.username}</span>
-                      <span className="message-time">{formatTime(msg.timestamp)}</span>
-                    </div>
-                  )}
-                  <div className="message-content">{msg.message}</div>
-                </div>
-              ))}
-              
-              {typingUsers.length > 0 && (
-                <div className="typing-indicator">
-                  {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
-                </div>
-              )}
-              
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-
-          <div className="online-users">
-            <h3>Online Users ({onlineUsers.length})</h3>
-            <ul>
-              {onlineUsers.map((user) => (
-                <li key={user.id} className={user.username === username ? 'current-user' : ''}>
-                  🟢 {user.username}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        <form className="message-form" onSubmit={sendMessage}>
-          <input
-            type="text"
-            placeholder="Type a message..."
-            value={currentMessage}
-            onChange={handleTyping}
-            disabled={!isConnected}
-          />
-          <button type="submit" disabled={!isConnected || !currentMessage.trim()}>
-            Send
-          </button>
-        </form>
-      </div>
-    </div>
+  return React.createElement('div', { className: 'app' },
+    React.createElement('div', { className: 'chat-container' },
+      React.createElement('div', { className: 'chat-header' },
+        React.createElement('h2', null, 'Real-Time Chat'),
+        React.createElement('div', { className: 'header-info' },
+          React.createElement('span', { className: 'username' }, `Welcome, ${username}!`),
+          React.createElement('span', { className: 'connection-status' },
+            isConnected ? '🟢 Connected' : '🔴 Disconnected'
+          )
+        )
+      ),
+      React.createElement('div', { className: 'chat-body' },
+        React.createElement('div', { className: 'messages-container' },
+          React.createElement('div', { className: 'messages' },
+            ...messages.map((msg) =>
+              React.createElement('div', {
+                key: msg.id,
+                className: `message ${msg.isSystem ? 'system-message' : ''} ${msg.username === username ? 'own-message' : ''}`
+              },
+                !msg.isSystem && React.createElement('div', { className: 'message-header' },
+                  React.createElement('span', { className: 'message-username' }, msg.username),
+                  React.createElement('span', { className: 'message-time' }, formatTime(msg.timestamp))
+                ),
+                React.createElement('div', { className: 'message-content' }, msg.message)
+              )
+            ),
+            typingUsers.length > 0 && React.createElement('div', { className: 'typing-indicator' },
+              `${typingUsers.join(', ')} ${typingUsers.length === 1 ? 'is' : 'are'} typing...`
+            ),
+            React.createElement('div', { ref: messagesEndRef })
+          )
+        ),
+        React.createElement('div', { className: 'online-users' },
+          React.createElement('h3', null, `Online Users (${onlineUsers.length})`),
+          React.createElement('ul', null,
+            ...onlineUsers.map((user) =>
+              React.createElement('li', {
+                key: user.id,
+                className: user.username === username ? 'current-user' : ''
+              }, `🟢 ${user.username}`)
+            )
+          )
+        )
+      ),
+      React.createElement('form', { className: 'message-form', onSubmit: sendMessage },
+        React.createElement('input', {
+          type: 'text',
+          placeholder: 'Type a message...',
+          value: currentMessage,
+          onChange: handleTyping,
+          disabled: !isConnected
+        }),
+        React.createElement('button', {
+          type: 'submit',
+          disabled: !isConnected || !currentMessage.trim()
+        }, 'Send')
+      )
+    )
   );
 }
-
-export default App;

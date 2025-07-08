@@ -7,16 +7,18 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 
-// Configure Socket.IO with CORS
+// Configure Socket.IO with CORS - Allow multiple origins or all origins for development
 const io = socketIo(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    origin: "*", // Allow all origins for development
     methods: ["GET", "POST"]
   }
 });
 
-// Middleware
-app.use(cors());
+// Middleware - Also configure Express CORS
+app.use(cors({
+  origin: "*" // Allow all origins for development
+}));
 app.use(express.json());
 
 // Store connected users
@@ -121,4 +123,5 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Socket.IO server ready for connections`);
+  console.log(`CORS configured to allow all origins for development`);
 });
