@@ -1,0 +1,19 @@
+# Node dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+
+# Logs
+npm-debug.log*
+pnpm-debug.log*
+
+# IDEs
+.vscode/
+*.log
+
+# OS stuff
+.DS_Store
+Thumbs.db
