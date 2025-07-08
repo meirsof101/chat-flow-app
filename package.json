@@ -1,12 +1,15 @@
 {
   "name": "web-sockets-assignment",
   "version": "1.0.0",
-  "private": true,
+  "description": "",
+  "main": "index.js",
   "scripts": {
-    "dev": "concurrently \"pnpm --filter client run dev\" \"pnpm --filter server run dev\""
+    "dev": "concurrently \"cd client && pnpm run dev\" \"cd server && pnpm run dev\""
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
   "devDependencies": {
     "concurrently": "^8.0.0"
   }
 }
-
