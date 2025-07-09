@@ -13,15 +13,16 @@ const io = socketIo(server, {
   }
 });
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-// Store connected users with their socket IDs
+// Store connected users with their rooms
 const connectedUsers = new Map();
-const typingUsers = new Set();
+const chatRooms = new Set(['general', 'random', 'tech']);
+const roomUsers = new Map();
 
-// Socket.IO connection handling
+// Initialize room user counts
+chatRooms.forEach(room => {
+  roomUsers.set(room, 0);
+});
+
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
@@ -29,97 +30,156 @@ io.on('connection', (socket) => {
   socket.on('joinChat', (data) => {
     const { username } = data;
     
-    // Store user info with socket ID for private messaging
+    // Store user info with default room
     connectedUsers.set(socket.id, {
       username,
       socketId: socket.id,
+      currentRoom: 'general',
       joinedAt: new Date()
     });
 
-    // Also create a reverse mapping for quick lookup
-    connectedUsers.set(username, socket.id);
+    // Join the default room
+    socket.join('general');
+    
+    // Update room user count
+    roomUsers.set('general', (roomUsers.get('general') || 0) + 1);
 
-    // Join user to global room
-    socket.join('global');
-    
-    // Notify OTHER users about new user joining
-    socket.to('global').emit('userJoined', { username });
-    
-    // Send updated user list to ALL clients
-    const userList = Array.from(connectedUsers.values())
-      .filter(user => typeof user === 'object' && user.username)
-      .map(user => user.username);
-    
+    // Send current room list
+    socket.emit('roomList', Array.from(chatRooms));
+
+    // Send updated user list to all clients
+    const userList = Array.from(connectedUsers.values()).map(user => user.username);
     io.emit('userList', userList);
-    
-    console.log(`${username} joined the chat`);
+
+    // Send updated room users
+    const roomUserCounts = Object.fromEntries(roomUsers);
+    io.emit('roomUsers', roomUserCounts);
+
+    // Notify others about new user joining the room
+    socket.to('general').emit('userJoined', { 
+      username, 
+      room: 'general'
+    });
+
+    console.log(`User ${username} joined general room`);
   });
 
-  // Handle sending public messages
-  socket.on('sendMessage', (messageData) => {
-    console.log('Public message received:', messageData);
+  // Handle switching rooms
+  socket.on('switchRoom', (data) => {
+    const { username, room } = data;
+    const user = connectedUsers.get(socket.id);
     
-    const message = {
-      username: messageData.username,
-      message: messageData.message,
-      timestamp: messageData.timestamp,
-      type: 'message'
-    };
-    
-    // Send message to ALL users
-    io.emit('message', message);
-    
-    console.log(`Broadcasting message from ${messageData.username}: ${messageData.message}`);
-  });
-
-  // Handle sending private messages
-  socket.on('privateMessage', (data) => {
-    const { from, to, message } = data;
-    console.log(`Private message from ${from} to ${to}: ${message}`);
-    
-    // Get the socket ID of the recipient
-    const recipientSocketId = connectedUsers.get(to);
-    
-    if (recipientSocketId) {
-      // Send to recipient
-      io.to(recipientSocketId).emit('privateMessage', {
-        from,
-        to,
-        message,
-        timestamp: new Date().toISOString()
-      });
+    if (user) {
+      const oldRoom = user.currentRoom;
       
-      console.log(`Private message sent from ${from} to ${to}`);
-    } else {
-      console.log(`User ${to} not found for private message`);
+      // Leave old room
+      socket.leave(oldRoom);
+      roomUsers.set(oldRoom, Math.max(0, (roomUsers.get(oldRoom) || 0) - 1));
       
-      // Optionally send error back to sender
-      socket.emit('privateMessageError', {
-        error: 'User not found',
-        targetUser: to
-      });
+      // Join new room
+      socket.join(room);
+      roomUsers.set(room, (roomUsers.get(room) || 0) + 1);
+      
+      // Update user's current room
+      user.currentRoom = room;
+      connectedUsers.set(socket.id, user);
+      
+      // Send updated room users to all clients
+      const roomUserCounts = Object.fromEntries(roomUsers);
+      io.emit('roomUsers', roomUserCounts);
+      
+      // Notify room changes
+      socket.to(oldRoom).emit('userLeft', { username, room: oldRoom });
+      socket.to(room).emit('userJoined', { username, room });
+      
+      console.log(`User ${username} switched from ${oldRoom} to ${room}`);
     }
   });
 
-  // Handle typing indicators for global chat
-  socket.on('startTyping', (data) => {
+  // Handle creating new rooms
+  socket.on('createRoom', (data) => {
+    const { roomName, creator } = data;
+    
+    if (!chatRooms.has(roomName)) {
+      chatRooms.add(roomName);
+      roomUsers.set(roomName, 0);
+      
+      // Send updated room list to all clients
+      io.emit('roomList', Array.from(chatRooms));
+      
+      // Send updated room users
+      const roomUserCounts = Object.fromEntries(roomUsers);
+      io.emit('roomUsers', roomUserCounts);
+      
+      // Notify about room creation
+      io.emit('roomCreated', { roomName, creator });
+      
+      console.log(`Room ${roomName} created by ${creator}`);
+    }
+  });
+
+  // Handle sending messages to rooms
+  socket.on('sendMessage', (messageData) => {
     const user = connectedUsers.get(socket.id);
-    if (user && user.username) {
-      typingUsers.add(user.username);
-      socket.to('global').emit('userTyping', {
+    if (user) {
+      const message = {
         username: user.username,
-        isTyping: true
+        message: messageData.message,
+        timestamp: new Date().toISOString(),
+        room: messageData.room || user.currentRoom
+      };
+      
+      console.log(`Message from ${user.username} in room ${message.room}:`, message.message);
+      
+      // Broadcast to all users in the room
+      io.to(message.room).emit('message', message);
+    }
+  });
+
+  // Handle private messages
+  socket.on('privateMessage', (messageData) => {
+    const sender = connectedUsers.get(socket.id);
+    if (sender) {
+      const message = {
+        sender: sender.username,
+        receiver: messageData.receiver,
+        message: messageData.message,
+        timestamp: messageData.timestamp,
+        type: 'private'
+      };
+      
+      console.log(`Private message from ${sender.username} to ${messageData.receiver}:`, message.message);
+      
+      // Find receiver's socket
+      const receiverSocket = Array.from(connectedUsers.entries())
+        .find(([id, user]) => user.username === messageData.receiver);
+      
+      if (receiverSocket) {
+        // Send to receiver
+        io.to(receiverSocket[0]).emit('privateMessage', message);
+        // Send back to sender (so they see their own message)
+        socket.emit('privateMessage', message);
+      }
+    }
+  });
+
+  // Handle typing indicators for rooms
+  socket.on('typing', (data) => {
+    const user = connectedUsers.get(socket.id);
+    if (user) {
+      socket.to(data.room || user.currentRoom).emit('userTyping', { 
+        username: data.username,
+        room: data.room || user.currentRoom
       });
     }
   });
 
   socket.on('stopTyping', (data) => {
     const user = connectedUsers.get(socket.id);
-    if (user && user.username) {
-      typingUsers.delete(user.username);
-      socket.to('global').emit('userTyping', {
-        username: user.username,
-        isTyping: false
+    if (user) {
+      socket.to(data.room || user.currentRoom).emit('userStoppedTyping', { 
+        username: data.username,
+        room: data.room || user.currentRoom
       });
     }
   });
@@ -127,91 +187,34 @@ io.on('connection', (socket) => {
   // Handle user disconnection
   socket.on('disconnect', () => {
     const user = connectedUsers.get(socket.id);
-    if (user && user.username) {
-      console.log(`${user.username} disconnected`);
+    if (user) {
+      // Update room user count
+      roomUsers.set(user.currentRoom, Math.max(0, (roomUsers.get(user.currentRoom) || 0) - 1));
       
-      // Remove from typing users
-      typingUsers.delete(user.username);
-      
-      // Remove from connected users (both mappings)
+      // Remove user from connected users
       connectedUsers.delete(socket.id);
-      connectedUsers.delete(user.username);
       
-      // Notify OTHER users about user leaving
-      socket.to('global').emit('userLeft', { username: user.username });
-      
-      // Send updated user list to ALL clients
-      const userList = Array.from(connectedUsers.values())
-        .filter(user => typeof user === 'object' && user.username)
-        .map(user => user.username);
-      
+      // Send updated user list to all clients
+      const userList = Array.from(connectedUsers.values()).map(user => user.username);
       io.emit('userList', userList);
+      
+      // Send updated room users
+      const roomUserCounts = Object.fromEntries(roomUsers);
+      io.emit('roomUsers', roomUserCounts);
+      
+      // Notify others about user leaving
+      socket.to(user.currentRoom).emit('userLeft', { 
+        username: user.username,
+        room: user.currentRoom
+      });
+      
+      console.log(`User ${user.username} disconnected from ${user.currentRoom}`);
     }
-    
     console.log('Client disconnected:', socket.id);
-  });
-
-  // Handle connection errors
-  socket.on('error', (error) => {
-    console.error('Socket error:', error);
-  });
-});
-
-// Basic route for health check
-app.get('/health', (req, res) => {
-  const userCount = Array.from(connectedUsers.values())
-    .filter(user => typeof user === 'object' && user.username).length;
-  
-  res.json({ 
-    status: 'OK', 
-    connectedUsers: userCount,
-    uptime: process.uptime()
-  });
-});
-
-// Get connected users (REST endpoint)
-app.get('/api/users', (req, res) => {
-  const userList = Array.from(connectedUsers.values())
-    .filter(user => typeof user === 'object' && user.username)
-    .map(user => ({
-      username: user.username,
-      joinedAt: user.joinedAt
-    }));
-  
-  res.json(userList);
-});
-
-// Get chat statistics
-app.get('/api/stats', (req, res) => {
-  const userCount = Array.from(connectedUsers.values())
-    .filter(user => typeof user === 'object' && user.username).length;
-  
-  res.json({
-    totalUsers: userCount,
-    typingUsers: Array.from(typingUsers),
-    uptime: process.uptime()
   });
 });
 
 const PORT = process.env.PORT || 5000;
-
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log('Socket.IO server ready for connections');
-  console.log('Features enabled:');
-  console.log('- Global chat');
-  console.log('- Private messaging');
-  console.log('- Typing indicators');
-  console.log('- User presence');
 });
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-});
-
-module.exports = { app, server, io };

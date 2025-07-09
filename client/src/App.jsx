@@ -5,170 +5,222 @@ const ChatApp = () => {
   const [socket, setSocket] = useState(null);
   const [username, setUsername] = useState('');
   const [isJoined, setIsJoined] = useState(false);
-  const [messages, setMessages] = useState([]);
-  const [privateChats, setPrivateChats] = useState({});
-  const [messageInput, setMessageInput] = useState('');
+  const [messages, setMessages] = useState({});
+  const [message, setMessage] = useState('');
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
-  const [isTyping, setIsTyping] = useState(false);
+  const [privateChats, setPrivateChats] = useState([]);
   const [activeChat, setActiveChat] = useState('global');
   const [unreadCounts, setUnreadCounts] = useState({});
-  
+  const [chatRooms, setChatRooms] = useState(['general', 'random', 'tech']);
+  const [activeRoom, setActiveRoom] = useState('general');
+  const [newRoomName, setNewRoomName] = useState('');
+  const [showCreateRoom, setShowCreateRoom] = useState(false);
+  const [roomUsers, setRoomUsers] = useState({});
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
   useEffect(() => {
-    // Initialize socket connection
-    const newSocket = io('http://localhost:5000');
-    setSocket(newSocket);
+    scrollToBottom();
+  }, [messages, activeChat, activeRoom]);
 
-    // Listen for incoming messages
-    newSocket.on('message', (message) => {
-      setMessages(prev => [...prev, message]);
-    });
+  useEffect(() => {
+    if (username) {
+      const newSocket = io('http://localhost:5000');
+      setSocket(newSocket);
 
-    // Listen for private messages
-    newSocket.on('privateMessage', (data) => {
-      const chatKey = data.from === username ? data.to : data.from;
-      
-      setPrivateChats(prev => ({
-        ...prev,
-        [chatKey]: [...(prev[chatKey] || []), {
-          ...data,
-          timestamp: new Date().toISOString()
-        }]
-      }));
+      // Join chat
+      newSocket.emit('joinChat', { username });
 
-      // Add unread count if not in active chat
-      if (activeChat !== chatKey) {
-        setUnreadCounts(prev => ({
+      // Listen for messages
+      newSocket.on('message', (data) => {
+        setMessages(prev => ({
           ...prev,
-          [chatKey]: (prev[chatKey] || 0) + 1
+          [data.room || 'general']: [...(prev[data.room || 'general'] || []), data]
         }));
-      }
-    });
+      });
 
-    // Listen for user list updates
-    newSocket.on('userList', (users) => {
-      setOnlineUsers(users);
-    });
+      // Listen for private messages
+      newSocket.on('privateMessage', (data) => {
+        const chatId = data.sender === username ? data.receiver : data.sender;
+        setMessages(prev => ({
+          ...prev,
+          [chatId]: [...(prev[chatId] || []), data]
+        }));
+        
+        // Add to private chats if not already there
+        setPrivateChats(prev => {
+          if (!prev.includes(chatId)) {
+            return [...prev, chatId];
+          }
+          return prev;
+        });
 
-    // Listen for typing indicators
-    newSocket.on('userTyping', (data) => {
-      setTypingUsers(prev => {
-        if (data.isTyping) {
-          return [...prev.filter(user => user !== data.username), data.username];
-        } else {
-          return prev.filter(user => user !== data.username);
+        // Update unread count if not in active chat
+        if (activeChat !== chatId) {
+          setUnreadCounts(prev => ({
+            ...prev,
+            [chatId]: (prev[chatId] || 0) + 1
+          }));
         }
       });
-    });
 
-    // Listen for user join/leave notifications
-    newSocket.on('userJoined', (data) => {
-      setMessages(prev => [...prev, {
-        type: 'notification',
-        message: `${data.username} joined the chat`,
-        timestamp: new Date().toISOString()
-      }]);
-    });
+      // Listen for online users
+      newSocket.on('userList', (users) => {
+        setOnlineUsers(users);
+      });
 
-    newSocket.on('userLeft', (data) => {
-      setMessages(prev => [...prev, {
-        type: 'notification',
-        message: `${data.username} left the chat`,
-        timestamp: new Date().toISOString()
-      }]);
-    });
+      // Listen for room users
+      newSocket.on('roomUsers', (data) => {
+        setRoomUsers(data);
+      });
 
-    return () => {
-      newSocket.close();
-    };
-  }, [username, activeChat]);
+      // Listen for typing indicators
+      newSocket.on('userTyping', (data) => {
+        setTypingUsers(prev => {
+          if (!prev.includes(data.username)) {
+            return [...prev, data.username];
+          }
+          return prev;
+        });
+      });
 
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, privateChats, activeChat]);
+      newSocket.on('userStoppedTyping', (data) => {
+        setTypingUsers(prev => prev.filter(user => user !== data.username));
+      });
 
-  const handleJoinChat = (e) => {
-    e.preventDefault();
-    if (username.trim() && socket) {
-      socket.emit('joinChat', { username });
+      // Listen for user join/leave notifications
+      newSocket.on('userJoined', (data) => {
+        setMessages(prev => ({
+          ...prev,
+          [data.room || 'general']: [...(prev[data.room || 'general'] || []), {
+            type: 'notification',
+            message: `${data.username} joined the chat`,
+            timestamp: new Date().toISOString()
+          }]
+        }));
+      });
+
+      newSocket.on('userLeft', (data) => {
+        setMessages(prev => ({
+          ...prev,
+          [data.room || 'general']: [...(prev[data.room || 'general'] || []), {
+            type: 'notification',
+            message: `${data.username} left the chat`,
+            timestamp: new Date().toISOString()
+          }]
+        }));
+      });
+
+      // Listen for room updates
+      newSocket.on('roomList', (rooms) => {
+        setChatRooms(rooms);
+      });
+
+      newSocket.on('roomCreated', (data) => {
+        setMessages(prev => ({
+          ...prev,
+          [activeRoom]: [...(prev[activeRoom] || []), {
+            type: 'notification',
+            message: `Room #${data.roomName} created by ${data.creator}`,
+            timestamp: new Date().toISOString()
+          }]
+        }));
+      });
+
+      return () => {
+        newSocket.disconnect();
+      };
+    }
+  }, [username, activeRoom]);
+
+  const joinChat = () => {
+    if (username.trim()) {
       setIsJoined(true);
     }
   };
 
-  const handleSendMessage = (e) => {
-    e.preventDefault();
-    if (messageInput.trim() && socket && username) {
+  const sendMessage = () => {
+    if (message.trim() && socket) {
       if (activeChat === 'global') {
-        const messageData = {
-          username,
-          message: messageInput.trim(),
-          timestamp: new Date().toISOString()
-        };
-        
-        socket.emit('sendMessage', messageData);
+        // Send to current room
+        socket.emit('sendMessage', { 
+          message, 
+          username, 
+          room: activeRoom 
+        });
       } else {
         // Send private message
-        const privateMessageData = {
-          from: username,
-          to: activeChat,
-          message: messageInput.trim(),
+        socket.emit('privateMessage', {
+          message,
+          sender: username,
+          receiver: activeChat,
           timestamp: new Date().toISOString()
-        };
-        
-        socket.emit('privateMessage', privateMessageData);
-        
-        // Add to local private chat
-        setPrivateChats(prev => ({
-          ...prev,
-          [activeChat]: [...(prev[activeChat] || []), privateMessageData]
-        }));
+        });
       }
-      
-      setMessageInput('');
-      
-      // Stop typing indicator
-      if (isTyping) {
-        socket.emit('stopTyping', { username });
-        setIsTyping(false);
-      }
+      setMessage('');
     }
   };
 
   const handleTyping = (e) => {
-    setMessageInput(e.target.value);
+    setMessage(e.target.value);
     
-    if (!isTyping && socket && username) {
-      setIsTyping(true);
-      socket.emit('startTyping', { username });
-    }
-    
-    // Clear existing timeout
-    if (typingTimeoutRef.current) {
+    if (socket && activeChat === 'global') {
+      socket.emit('typing', { username, room: activeRoom });
+      
       clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        socket.emit('stopTyping', { username, room: activeRoom });
+      }, 1000);
     }
-    
-    // Set new timeout to stop typing
-    typingTimeoutRef.current = setTimeout(() => {
-      if (socket && username) {
-        socket.emit('stopTyping', { username });
-        setIsTyping(false);
-      }
-    }, 1000);
   };
 
   const startPrivateChat = (targetUser) => {
     if (targetUser !== username) {
       setActiveChat(targetUser);
+      if (!privateChats.includes(targetUser)) {
+        setPrivateChats(prev => [...prev, targetUser]);
+      }
       // Clear unread count
       setUnreadCounts(prev => ({
         ...prev,
         [targetUser]: 0
       }));
     }
+  };
+
+  const switchToRoom = (roomName) => {
+    setActiveRoom(roomName);
+    setActiveChat('global');
+    if (socket) {
+      socket.emit('switchRoom', { username, room: roomName });
+    }
+  };
+
+  const createRoom = () => {
+    if (newRoomName.trim() && socket) {
+      socket.emit('createRoom', { roomName: newRoomName, creator: username });
+      setNewRoomName('');
+      setShowCreateRoom(false);
+    }
+  };
+
+  const getCurrentMessages = () => {
+    if (activeChat === 'global') {
+      return messages[activeRoom] || [];
+    }
+    return messages[activeChat] || [];
+  };
+
+  const getCurrentTypingUsers = () => {
+    if (activeChat === 'global') {
+      return typingUsers.filter(user => user !== username);
+    }
+    return [];
   };
 
   const formatTime = (timestamp) => {
@@ -178,58 +230,29 @@ const ChatApp = () => {
     });
   };
 
-  const getTypingMessage = () => {
-    if (typingUsers.length === 0) return '';
-    if (typingUsers.length === 1) return `${typingUsers[0]} is typing...`;
-    if (typingUsers.length === 2) return `${typingUsers[0]} and ${typingUsers[1]} are typing...`;
-    return `${typingUsers.slice(0, -1).join(', ')} and ${typingUsers[typingUsers.length - 1]} are typing...`;
-  };
-
-  const getCurrentMessages = () => {
-    if (activeChat === 'global') {
-      return messages;
-    }
-    return privateChats[activeChat] || [];
-  };
-
-  const getChatTitle = () => {
-    if (activeChat === 'global') {
-      return 'Global Chat';
-    }
-    return `Private Chat with ${activeChat}`;
-  };
-
   if (!isJoined) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome to Advanced Chat</h1>
-            <p className="text-gray-600">Enter your username to join the conversation</p>
-          </div>
-          
-          <div className="space-y-4">
-            <div>
+      <div className="min-h-screen bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
+        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
+          <div className="text-center">
+            <h1 className="text-4xl font-bold text-white mb-2">💬 Advanced Chat</h1>
+            <p className="text-white/80 mb-8">Join the conversation with rooms & private messaging</p>
+            <div className="space-y-4">
               <input
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="Enter your username"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
-                onKeyPress={(e) => e.key === 'Enter' && handleJoinChat(e)}
+                className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/40 backdrop-blur-sm"
+                onKeyPress={(e) => e.key === 'Enter' && joinChat()}
               />
+              <button
+                onClick={joinChat}
+                className="w-full bg-white/20 hover:bg-white/30 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200 backdrop-blur-sm border border-white/20"
+              >
+                Join Chat
+              </button>
             </div>
-            <button
-              onClick={handleJoinChat}
-              className="w-full bg-indigo-600 text-white py-3 px-4 rounded-lg hover:bg-indigo-700 transition-colors font-medium focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-            >
-              Join Chat
-            </button>
           </div>
         </div>
       </div>
@@ -237,73 +260,100 @@ const ChatApp = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 flex">
-      {/* Sidebar with online users and chat tabs */}
-      <div className="w-64 bg-white shadow-lg border-r border-gray-200">
-        {/* Chat Tabs */}
-        <div className="p-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Chats</h2>
-          <div className="space-y-2">
-            {/* Global Chat Tab */}
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex">
+      {/* Sidebar */}
+      <div className="w-80 bg-gray-800/50 backdrop-blur-sm border-r border-gray-700/50 flex flex-col">
+        {/* Chat Rooms */}
+        <div className="p-4 border-b border-gray-700/50">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-white">🏠 Chat Rooms</h2>
             <button
-              onClick={() => setActiveChat('global')}
-              className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
-                activeChat === 'global' 
-                  ? 'bg-indigo-100 text-indigo-700 font-medium' 
-                  : 'hover:bg-gray-100 text-gray-700'
-              }`}
+              onClick={() => setShowCreateRoom(!showCreateRoom)}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded-lg text-sm transition-colors"
             >
-              <div className="flex items-center justify-between">
-                <span>🌍 Global Chat</span>
-                {activeChat !== 'global' && unreadCounts.global > 0 && (
-                  <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1">
-                    {unreadCounts.global}
-                  </span>
-                )}
-              </div>
+              +
             </button>
-            
-            {/* Private Chat Tabs */}
-            {Object.keys(privateChats).map(chatUser => (
+          </div>
+          
+          {showCreateRoom && (
+            <div className="mb-4 space-y-2">
+              <input
+                type="text"
+                value={newRoomName}
+                onChange={(e) => setNewRoomName(e.target.value)}
+                placeholder="Room name"
+                className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                onKeyPress={(e) => e.key === 'Enter' && createRoom()}
+              />
               <button
-                key={chatUser}
-                onClick={() => startPrivateChat(chatUser)}
-                className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
-                  activeChat === chatUser 
-                    ? 'bg-indigo-100 text-indigo-700 font-medium' 
-                    : 'hover:bg-gray-100 text-gray-700'
+                onClick={createRoom}
+                className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm transition-colors"
+              >
+                Create Room
+              </button>
+            </div>
+          )}
+          
+          <div className="space-y-1">
+            {chatRooms.map((room) => (
+              <button
+                key={room}
+                onClick={() => switchToRoom(room)}
+                className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center justify-between ${
+                  activeRoom === room && activeChat === 'global'
+                    ? 'bg-purple-600 text-white'
+                    : 'text-gray-300 hover:bg-gray-700'
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <span>💬 {chatUser}</span>
-                  {activeChat !== chatUser && unreadCounts[chatUser] > 0 && (
-                    <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1">
-                      {unreadCounts[chatUser]}
-                    </span>
-                  )}
-                </div>
+                <span># {room}</span>
+                <span className="text-xs text-gray-400">
+                  {roomUsers[room] || 0}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Private Chats */}
+        <div className="p-4 border-b border-gray-700/50">
+          <h2 className="text-xl font-bold text-white mb-4">💬 Private Chats</h2>
+          <div className="space-y-1">
+            {privateChats.map((chatUser) => (
+              <button
+                key={chatUser}
+                onClick={() => setActiveChat(chatUser)}
+                className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center justify-between ${
+                  activeChat === chatUser
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                <span>{chatUser}</span>
+                {unreadCounts[chatUser] > 0 && (
+                  <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1 min-w-[1.5rem] text-center">
+                    {unreadCounts[chatUser]}
+                  </span>
+                )}
               </button>
             ))}
           </div>
         </div>
 
         {/* Online Users */}
-        <div className="p-4 border-b border-gray-200">
-          <h3 className="text-sm font-semibold text-gray-900 mb-2">Online Users</h3>
-          <p className="text-xs text-gray-600 mb-3">{onlineUsers.length} online</p>
+        <div className="p-4 flex-1">
+          <h2 className="text-xl font-bold text-white mb-4">
+            👥 Online Users ({onlineUsers.length})
+          </h2>
           <div className="space-y-2">
-            {onlineUsers.map((user, index) => (
-              <div key={index} className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className={`text-sm ${user === username ? 'font-semibold text-indigo-600' : 'text-gray-700'}`}>
-                    {user} {user === username && '(You)'}
-                  </span>
-                </div>
+            {onlineUsers.map((user) => (
+              <div key={user} className="flex items-center justify-between p-2 bg-gray-700/30 rounded-lg">
+                <span className={`${user === username ? 'text-yellow-400 font-semibold' : 'text-gray-300'}`}>
+                  {user === username ? `${user} (You)` : user}
+                </span>
                 {user !== username && (
                   <button
                     onClick={() => startPrivateChat(user)}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs transition-colors"
                   >
                     Chat
                   </button>
@@ -314,74 +364,105 @@ const ChatApp = () => {
         </div>
       </div>
 
-      {/* Main chat area */}
+      {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="bg-white shadow-sm border-b border-gray-200 p-4">
-          <div className="flex justify-between items-center">
-            <h1 className="text-xl font-semibold text-gray-900">{getChatTitle()}</h1>
+        {/* Chat Header */}
+        <div className="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700/50 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-white">
+                {activeChat === 'global' ? `# ${activeRoom}` : `💬 ${activeChat}`}
+              </h1>
+              <p className="text-gray-400 text-sm">
+                {activeChat === 'global' 
+                  ? `${roomUsers[activeRoom] || 0} users in room`
+                  : 'Private conversation'
+                }
+              </p>
+            </div>
             <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span className="text-sm text-gray-600">Connected as {username}</span>
+              <button
+                onClick={() => setActiveChat('global')}
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  activeChat === 'global'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                🌍 Global
+              </button>
             </div>
           </div>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {getCurrentMessages().map((msg, index) => (
-            <div key={index} className={`flex ${msg.type === 'notification' ? 'justify-center' : msg.username === username || msg.from === username ? 'justify-end' : 'justify-start'}`}>
-              {msg.type === 'notification' ? (
-                <div className="bg-gray-100 text-gray-600 text-xs px-3 py-1 rounded-full">
-                  {msg.message}
-                </div>
-              ) : (
-                <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                  msg.username === username || msg.from === username
-                    ? 'bg-indigo-600 text-white' 
-                    : 'bg-white text-gray-900 shadow-sm border border-gray-200'
-                }`}>
-                  <div className="flex items-center space-x-2 mb-1">
-                    <span className={`text-xs font-medium ${
-                      msg.username === username || msg.from === username ? 'text-indigo-200' : 'text-gray-500'
-                    }`}>
-                      {msg.username || msg.from}
-                    </span>
-                    <span className={`text-xs ${
-                      msg.username === username || msg.from === username ? 'text-indigo-200' : 'text-gray-400'
-                    }`}>
-                      {formatTime(msg.timestamp)}
-                    </span>
+        <div className="flex-1 p-4 overflow-y-auto">
+          <div className="space-y-4">
+            {getCurrentMessages().map((msg, index) => (
+              <div key={index} className={`flex items-start space-x-3 ${
+                msg.type === 'notification' ? 'justify-center' : ''
+              }`}>
+                {msg.type === 'notification' ? (
+                  <div className="bg-gray-600/50 text-gray-300 px-4 py-2 rounded-full text-sm">
+                    {msg.message}
                   </div>
-                  <p className="text-sm">{msg.message}</p>
+                ) : (
+                  <>
+                    <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                      {(msg.username || msg.sender || 'U')[0].toUpperCase()}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2 mb-1">
+                        <span className="font-semibold text-white">
+                          {msg.username || msg.sender}
+                        </span>
+                        <span className="text-gray-400 text-xs">
+                          {formatTime(msg.timestamp)}
+                        </span>
+                      </div>
+                      <div className="bg-gray-700/50 backdrop-blur-sm rounded-lg px-4 py-2 text-gray-100">
+                        {msg.message}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+            
+            {getCurrentTypingUsers().length > 0 && (
+              <div className="flex items-center space-x-2 text-gray-400 text-sm">
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                 </div>
-              )}
-            </div>
-          ))}
+                <span>
+                  {getCurrentTypingUsers().join(', ')} {getCurrentTypingUsers().length === 1 ? 'is' : 'are'} typing...
+                </span>
+              </div>
+            )}
+          </div>
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Typing indicator */}
-        {activeChat === 'global' && typingUsers.length > 0 && (
-          <div className="px-4 py-2 text-sm text-gray-600 italic">
-            {getTypingMessage()}
-          </div>
-        )}
-
-        {/* Message input */}
-        <div className="bg-white border-t border-gray-200 p-4">
-          <div className="flex space-x-2">
+        {/* Message Input */}
+        <div className="bg-gray-800/50 backdrop-blur-sm border-t border-gray-700/50 p-4">
+          <div className="flex items-center space-x-3">
             <input
               type="text"
-              value={messageInput}
+              value={message}
               onChange={handleTyping}
-              placeholder={activeChat === 'global' ? 'Type a message...' : `Message ${activeChat}...`}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage(e)}
+              placeholder={
+                activeChat === 'global' 
+                  ? `Message #${activeRoom}...` 
+                  : `Message ${activeChat}...`
+              }
+              className="flex-1 px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 backdrop-blur-sm"
+              onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
             />
             <button
-              onClick={handleSendMessage}
-              className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+              onClick={sendMessage}
+              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-6 py-3 rounded-xl transition-all duration-200 font-semibold shadow-lg"
             >
               Send
             </button>
