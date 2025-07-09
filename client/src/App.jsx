@@ -13,6 +13,7 @@ const ChatApp = () => {
   const [activeChat, setActiveChat] = useState('global');
   const [unreadCounts, setUnreadCounts] = useState({});
   const [chatRooms, setChatRooms] = useState(['general', 'random', 'tech']);
+  const [messageReactions, setMessageReactions] = useState({});
   const [activeRoom, setActiveRoom] = useState('general');
   const [newRoomName, setNewRoomName] = useState('');
   const [showCreateRoom, setShowCreateRoom] = useState(false);
@@ -27,6 +28,18 @@ const ChatApp = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, activeChat, activeRoom]);
+
+  // Message reactions handler
+  const handleReaction = (messageId, emoji) => {
+    if (socket) {
+      socket.emit('addReaction', {
+        messageId,
+        emoji,
+        username,
+        room: activeRoom
+      });
+    }
+  };
 
   useEffect(() => {
     if (username) {
@@ -51,7 +64,7 @@ const ChatApp = () => {
           ...prev,
           [chatId]: [...(prev[chatId] || []), data]
         }));
-        
+
         // Add to private chats if not already there
         setPrivateChats(prev => {
           if (!prev.includes(chatId)) {
@@ -67,6 +80,14 @@ const ChatApp = () => {
             [chatId]: (prev[chatId] || 0) + 1
           }));
         }
+      });
+
+      // Listen for reaction updates
+      newSocket.on('reactionUpdate', (data) => {
+        setMessageReactions(prev => ({
+          ...prev,
+          [data.messageId]: data.reactions
+        }));
       });
 
       // Listen for online users
@@ -398,36 +419,73 @@ const ChatApp = () => {
         {/* Messages */}
         <div className="flex-1 p-4 overflow-y-auto">
           <div className="space-y-4">
-            {getCurrentMessages().map((msg, index) => (
-              <div key={index} className={`flex items-start space-x-3 ${
-                msg.type === 'notification' ? 'justify-center' : ''
-              }`}>
-                {msg.type === 'notification' ? (
-                  <div className="bg-gray-600/50 text-gray-300 px-4 py-2 rounded-full text-sm">
-                    {msg.message}
-                  </div>
-                ) : (
-                  <>
-                    <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                      {(msg.username || msg.sender || 'U')[0].toUpperCase()}
+            {getCurrentMessages().map((msg, index) => {
+              const messageId = `${msg.timestamp}_${msg.username || msg.sender}`;
+              const reactions = messageReactions[messageId] || {};
+              
+              return (
+                <div key={index} className={`flex items-start space-x-3 ${
+                  msg.type === 'notification' ? 'justify-center' : ''
+                }`}>
+                  {msg.type === 'notification' ? (
+                    <div className="bg-gray-600/50 text-gray-300 px-4 py-2 rounded-full text-sm">
+                      {msg.message}
                     </div>
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-2 mb-1">
-                        <span className="font-semibold text-white">
-                          {msg.username || msg.sender}
-                        </span>
-                        <span className="text-gray-400 text-xs">
-                          {formatTime(msg.timestamp)}
-                        </span>
+                  ) : (
+                    <>
+                      <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                        {(msg.username || msg.sender || 'U')[0].toUpperCase()}
                       </div>
-                      <div className="bg-gray-700/50 backdrop-blur-sm rounded-lg px-4 py-2 text-gray-100">
-                        {msg.message}
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-1">
+                          <span className="font-semibold text-white">
+                            {msg.username || msg.sender}
+                          </span>
+                          <span className="text-gray-400 text-xs">
+                            {formatTime(msg.timestamp)}
+                          </span>
+                        </div>
+                        <div className="bg-gray-700/50 backdrop-blur-sm rounded-lg px-4 py-2 text-gray-100 relative group">
+                          {msg.message}
+                          
+                          {/* Reaction Button */}
+                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex space-x-1">
+                              {['👍', '❤️', '😂', '😮', '😢', '😡'].map((emoji) => (
+                                <button
+                                  key={emoji}
+                                  onClick={() => handleReaction(messageId, emoji)}
+                                  className="hover:bg-gray-600 rounded px-1 py-0.5 text-sm transition-colors"
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Display Reactions */}
+                        {Object.keys(reactions).length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {Object.entries(reactions).map(([emoji, users]) => (
+                              <div
+                                key={emoji}
+                                className="bg-gray-600/50 rounded-full px-2 py-1 text-xs flex items-center space-x-1 cursor-pointer hover:bg-gray-600/70 transition-colors"
+                                onClick={() => handleReaction(messageId, emoji)}
+                                title={`${users.join(', ')}`}
+                              >
+                                <span>{emoji}</span>
+                                <span className="text-gray-300">{users.length}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
+                    </>
+                  )}
+                </div>
+              );
+            })}
             
             {getCurrentTypingUsers().length > 0 && (
               <div className="flex items-center space-x-2 text-gray-400 text-sm">

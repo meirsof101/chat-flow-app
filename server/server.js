@@ -17,6 +17,7 @@ const io = socketIo(server, {
 const connectedUsers = new Map();
 const chatRooms = new Set(['general', 'random', 'tech']);
 const roomUsers = new Map();
+const messageReactions = new Map(); // Store message reactions
 
 // Initialize room user counts
 chatRooms.forEach(room => {
@@ -134,6 +135,40 @@ io.on('connection', (socket) => {
       // Broadcast to all users in the room
       io.to(message.room).emit('message', message);
     }
+  });
+
+  // Handle message reactions
+  socket.on('addReaction', (data) => {
+    const { messageId, emoji, username, room } = data;
+    
+    // Get existing reactions for this message
+    const reactions = messageReactions.get(messageId) || {};
+    
+    // Get users who reacted with this emoji
+    const usersWithEmoji = reactions[emoji] || [];
+    
+    // Toggle reaction (add if not present, remove if present)
+    if (usersWithEmoji.includes(username)) {
+      // Remove reaction
+      reactions[emoji] = usersWithEmoji.filter(user => user !== username);
+      if (reactions[emoji].length === 0) {
+        delete reactions[emoji];
+      }
+    } else {
+      // Add reaction
+      reactions[emoji] = [...usersWithEmoji, username];
+    }
+    
+    // Update reactions
+    messageReactions.set(messageId, reactions);
+    
+    // Broadcast to all users in the room
+    io.to(room).emit('reactionUpdate', {
+      messageId,
+      reactions
+    });
+    
+    console.log(`Reaction ${emoji} by ${username} on message ${messageId}`);
   });
 
   // Handle private messages
