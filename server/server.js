@@ -2,6 +2,9 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -23,7 +26,46 @@ const messageReactions = new Map(); // Store message reactions
 chatRooms.forEach(room => {
   roomUsers.set(room, 0);
 });
+// File upload setup
+const storage = multer.diskStorage({
+  destination: './uploads/',
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + '-' + file.originalname);
+  }
+});
 
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|pdf|txt|docx|mp4|mp3/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Invalid file type'));
+    }
+  }
+});
+// File upload endpoint
+app.post('/upload', upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  
+  res.json({
+    filename: req.file.filename,
+    originalname: req.file.originalname,
+    size: req.file.size,
+    mimetype: req.file.mimetype,
+    url: `/uploads/${req.file.filename}`
+  });
+});
+
+// Serve uploaded files
+app.use('/uploads', express.static('uploads'));
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
@@ -61,7 +103,24 @@ io.on('connection', (socket) => {
       username, 
       room: 'general'
     });
-
+    // Handle file messages
+    socket.on('file_message', (data) => {
+      const user = connectedUsers.get(socket.id);
+      if (user) {
+        const message = {
+          username: user.username,
+          type: 'file',
+          file: data.file,
+          timestamp: new Date().toISOString(),
+          room: data.room || user.currentRoom
+        };
+        
+        console.log(`File message from ${user.username} in room ${message.room}:`, message.file.originalname);
+        
+        // Broadcast to all users in the room
+        io.to(message.room).emit('message', message);
+      }
+    });
     console.log(`User ${username} joined general room`);
   });
 

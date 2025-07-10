@@ -18,8 +18,11 @@ const ChatApp = () => {
   const [newRoomName, setNewRoomName] = useState('');
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [roomUsers, setRoomUsers] = useState({});
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -28,6 +31,42 @@ const ChatApp = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, activeChat, activeRoom]);
+
+  // File upload function - MOVED INSIDE COMPONENT
+  const handleFileUpload = async (file) => {
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+      const response = await fetch('/upload', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const fileData = await response.json();
+      
+      // Send file message
+      socket.emit('file_message', {
+        file: fileData,
+        room: activeRoom
+      });
+      
+      setSelectedFile(null);
+    } catch (error) {
+      console.error('File upload failed:', error);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // File input handler - MOVED INSIDE COMPONENT
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      handleFileUpload(file);
+    }
+  };
 
   // Message reactions handler
   const handleReaction = (messageId, emoji) => {
@@ -422,7 +461,7 @@ const ChatApp = () => {
             {getCurrentMessages().map((msg, index) => {
               const messageId = `${msg.timestamp}_${msg.username || msg.sender}`;
               const reactions = messageReactions[messageId] || {};
-              
+
               return (
                 <div key={index} className={`flex items-start space-x-3 ${
                   msg.type === 'notification' ? 'justify-center' : ''
@@ -431,7 +470,48 @@ const ChatApp = () => {
                     <div className="bg-gray-600/50 text-gray-300 px-4 py-2 rounded-full text-sm">
                       {msg.message}
                     </div>
+                  ) : msg.type === 'file' ? (
+                    // FILE MESSAGE RENDERING
+                    <>
+                      <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                        {(msg.username || 'U')[0].toUpperCase()}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-1">
+                          <span className="font-semibold text-white">{msg.username}</span>
+                          <span className="text-gray-400 text-xs">{formatTime(msg.timestamp)}</span>
+                        </div>
+                        <div className="bg-gray-700/50 backdrop-blur-sm rounded-lg p-4">
+                          {msg.file.mimetype.startsWith('image/') ? (
+                            <img 
+                              src={`http://localhost:5000${msg.file.url}`}
+                              alt={msg.file.originalname}
+                              className="max-w-sm max-h-64 rounded-lg cursor-pointer hover:opacity-80 transition-opacity"
+                              onClick={() => window.open(`http://localhost:5000${msg.file.url}`, '_blank')}
+                            />
+                          ) : (
+                            <div className="flex items-center space-x-3 p-3 bg-gray-600/50 rounded-lg">
+                              <span className="text-3xl">📄</span>
+                              <div className="flex-1">
+                                <p className="font-medium text-white">{msg.file.originalname}</p>
+                                <p className="text-xs text-gray-400">
+                                  {(msg.file.size / 1024 / 1024).toFixed(2)} MB
+                                </p>
+                              </div>
+                              <a
+                                href={`http://localhost:5000${msg.file.url}`}
+                                download={msg.file.originalname}
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm transition-colors"
+                              >
+                                Download
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
                   ) : (
+                    // REGULAR MESSAGE RENDERING
                     <>
                       <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
                         {(msg.username || msg.sender || 'U')[0].toUpperCase()}
@@ -506,6 +586,25 @@ const ChatApp = () => {
         {/* Message Input */}
         <div className="bg-gray-800/50 backdrop-blur-sm border-t border-gray-700/50 p-4">
           <div className="flex items-center space-x-3">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileSelect}
+              className="hidden"
+              accept="image/*,video/*,audio/*,.pdf,.txt,.docx"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className={`p-3 rounded-xl transition-all ${
+                uploading 
+                  ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
+                  : 'bg-gray-700 text-white hover:bg-gray-600'
+              }`}
+              title="Upload file"
+            >
+              {uploading ? '⏳' : '📎'}
+            </button>
             <input
               type="text"
               value={message}
