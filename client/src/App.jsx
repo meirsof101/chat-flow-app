@@ -1,110 +1,143 @@
-import React, { useState, useEffect, useRef } from 'react';
-import io from 'socket.io-client';
+  import React, { useState, useEffect, useRef } from 'react';
+  import io from 'socket.io-client';
 
-const ChatApp = () => {
-  const [socket, setSocket] = useState(null);
-  const [username, setUsername] = useState('');
-  const [isJoined, setIsJoined] = useState(false);
-  const [messages, setMessages] = useState({});
-  const [message, setMessage] = useState('');
-  const [onlineUsers, setOnlineUsers] = useState([]);
-  const [typingUsers, setTypingUsers] = useState([]);
-  const [privateChats, setPrivateChats] = useState([]);
-  const [activeChat, setActiveChat] = useState('global');
-  const [unreadCounts, setUnreadCounts] = useState({});
-  const [chatRooms, setChatRooms] = useState(['general', 'random', 'tech']);
-  const [messageReactions, setMessageReactions] = useState({});
-  const [activeRoom, setActiveRoom] = useState('general');
-  const [newRoomName, setNewRoomName] = useState('');
-  const [showCreateRoom, setShowCreateRoom] = useState(false);
-  const [roomUsers, setRoomUsers] = useState({});
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const messagesEndRef = useRef(null);
-  const typingTimeoutRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const ChatApp = () => {
+    const [socket, setSocket] = useState(null);
+    const [user, setUser] = useState(null);
+    const [token, setToken] = useState(null);
+    const [authMode, setAuthMode] = useState('login');
+    const [authData, setAuthData] = useState({
+      username: '',
+      password: '',
+      email: ''
+    });
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [messages, setMessages] = useState({});
+    const [message, setMessage] = useState('');
+    const [onlineUsers, setOnlineUsers] = useState([]);
+    const [typingUsers, setTypingUsers] = useState([]);
+    const [privateChats, setPrivateChats] = useState([]);
+    const [activeChat, setActiveChat] = useState('global');
+    const [unreadCounts, setUnreadCounts] = useState({});
+    const [chatRooms, setChatRooms] = useState([]);
+    const [messageReactions, setMessageReactions] = useState({});
+    const [activeRoom, setActiveRoom] = useState(null);
+    const [newRoomName, setNewRoomName] = useState('');
+    const [showCreateRoom, setShowCreateRoom] = useState(false);
+    const [roomUsers, setRoomUsers] = useState({});
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    const [authError, setAuthError] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [hasJoinedRoom, setHasJoinedRoom] = useState(false);
+    const messagesEndRef = useRef(null);
+    const typingTimeoutRef = useRef(null);
+    const fileInputRef = useRef(null);
+    const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+    const [notificationPermission, setNotificationPermission] = useState(false);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+    const scrollToBottom = () => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    };
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, activeChat, activeRoom]);
+    useEffect(() => {
+      scrollToBottom();
+    }, [messages, activeChat, activeRoom]);
 
-  // File upload function - MOVED INSIDE COMPONENT
-  const handleFileUpload = async (file) => {
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    try {
-      const response = await fetch('/upload', {
-        method: 'POST',
-        body: formData
+    // Request notification permission on component mount
+    useEffect(() => {
+      if ('Notification' in window) {
+        Notification.requestPermission().then(permission => {
+          setNotificationPermission(permission === 'granted');
+        });
+      }
+    }, []);
+
+    const playNotificationSound = () => {
+      const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmsdBTuHzvHchjMGHm678+yOPwkRV67p8LNlHgg2jdX3zoNMAy2DyvLZiTYIG2m98+OaOAcYabLn8blTEAw+oOHswWUjBjqBzvHehjQHHmu79+yOPwkRV67p8LNlHgg2jdX3zoNMAy2DyvLZiTYIG2m98+OaOAcYabLn8blTEAw+oOHswWUjBjqBzvHehjQHHmu79+yOPwkRV67p8LNlHgg2jdX3zoNMAy2DyvLZiTYIG2m98+OaOA==');
+      audio.play().catch(e => console.log('Audio play failed:', e));
+    };
+
+    const showBrowserNotification = (title, body, icon) => {
+      if (notificationPermission && document.hidden && notificationsEnabled) {
+        new Notification(title, {
+          body: body,
+          icon: icon || '/favicon.ico',
+          badge: '/favicon.ico'
+        });
+      }
+    };
+
+    const handleAuth = async (e) => {
+      e.preventDefault();
+      setLoading(true);
+      setAuthError('');
+
+      try {
+        let endpoint = '/api/login';
+        let payload = { username: authData.username, password: authData.password };
+
+        if (authMode === 'register') {
+          endpoint = '/api/register';
+          payload.email = authData.email;
+        } else if (authMode === 'guest') {
+          endpoint = '/api/guest-login';
+          payload = { username: authData.username };
+        }
+
+        const response = await fetch(`http://localhost:5000${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          setToken(data.token);
+          setUser(data.user);
+          setIsAuthenticated(true);
+          connectSocket(data.token);
+        } else {
+          setAuthError(data.error || 'Authentication failed');
+        }
+      } catch (error) {
+        setAuthError('Network error. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const connectSocket = (authToken) => {
+      const newSocket = io('http://localhost:5000', {
+        auth: { token: authToken }
       });
-      
-      const fileData = await response.json();
-      
-      // Send file message
-      socket.emit('file_message', {
-        file: fileData,
-        room: activeRoom
-      });
-      
-      setSelectedFile(null);
-    } catch (error) {
-      console.error('File upload failed:', error);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  // File input handler - MOVED INSIDE COMPONENT
-  const handleFileSelect = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      handleFileUpload(file);
-    }
-  };
-
-  // Message reactions handler
-  const handleReaction = (messageId, emoji) => {
-    if (socket) {
-      socket.emit('addReaction', {
-        messageId,
-        emoji,
-        username,
-        room: activeRoom
-      });
-    }
-  };
-
-  useEffect(() => {
-    if (username) {
-      const newSocket = io('http://localhost:5000');
       setSocket(newSocket);
 
-      // Join chat
-      newSocket.emit('joinChat', { username });
-
-      // Listen for messages
       newSocket.on('message', (data) => {
         setMessages(prev => ({
           ...prev,
           [data.room || 'general']: [...(prev[data.room || 'general'] || []), data]
         }));
+
+        // Handle notifications for new messages
+        if (data.sender && user && data.sender !== user.username) {
+          playNotificationSound();
+          showBrowserNotification(
+            `New message from ${data.sender}`,
+            data.message,
+            '/user-icon.png'
+          );
+        }
       });
 
-      // Listen for private messages
       newSocket.on('privateMessage', (data) => {
-        const chatId = data.sender === username ? data.receiver : data.sender;
+        const chatId = data.sender === user?.username ? data.receiver : data.sender;
         setMessages(prev => ({
           ...prev,
           [chatId]: [...(prev[chatId] || []), data]
         }));
 
-        // Add to private chats if not already there
         setPrivateChats(prev => {
           if (!prev.includes(chatId)) {
             return [...prev, chatId];
@@ -112,16 +145,38 @@ const ChatApp = () => {
           return prev;
         });
 
-        // Update unread count if not in active chat
         if (activeChat !== chatId) {
           setUnreadCounts(prev => ({
             ...prev,
             [chatId]: (prev[chatId] || 0) + 1
           }));
         }
+
+        // Handle notifications for private messages
+        if (data.sender && user && data.sender !== user.username) {
+          playNotificationSound();
+          showBrowserNotification(
+            `Private message from ${data.sender}`,
+            data.message,
+            '/user-icon.png'
+          );
+        }
       });
 
-      // Listen for reaction updates
+      newSocket.on('roomJoined', (data) => {
+        setActiveRoom(data.room);
+        setActiveChat('global');
+        setHasJoinedRoom(true);
+        setMessages(prev => ({
+          ...prev,
+          [data.room]: [...(prev[data.room] || []), {
+            type: 'notification',
+            message: data.message,
+            timestamp: new Date().toISOString()
+          }]
+        }));
+      });
+
       newSocket.on('reactionUpdate', (data) => {
         setMessageReactions(prev => ({
           ...prev,
@@ -129,17 +184,14 @@ const ChatApp = () => {
         }));
       });
 
-      // Listen for online users
       newSocket.on('userList', (users) => {
         setOnlineUsers(users);
       });
 
-      // Listen for room users
       newSocket.on('roomUsers', (data) => {
         setRoomUsers(data);
       });
 
-      // Listen for typing indicators
       newSocket.on('userTyping', (data) => {
         setTypingUsers(prev => {
           if (!prev.includes(data.username)) {
@@ -153,16 +205,21 @@ const ChatApp = () => {
         setTypingUsers(prev => prev.filter(user => user !== data.username));
       });
 
-      // Listen for user join/leave notifications
       newSocket.on('userJoined', (data) => {
         setMessages(prev => ({
           ...prev,
           [data.room || 'general']: [...(prev[data.room || 'general'] || []), {
             type: 'notification',
-            message: `${data.username} joined the chat`,
+            message: `${data.username} joined the room`,
             timestamp: new Date().toISOString()
           }]
         }));
+        
+        showBrowserNotification(
+          'User Joined',
+          `${data.username} joined the chat`,
+          '/user-icon.png'
+        );
       });
 
       newSocket.on('userLeft', (data) => {
@@ -170,464 +227,669 @@ const ChatApp = () => {
           ...prev,
           [data.room || 'general']: [...(prev[data.room || 'general'] || []), {
             type: 'notification',
-            message: `${data.username} left the chat`,
+            message: `${data.username} left the room`,
             timestamp: new Date().toISOString()
           }]
         }));
+        
+        showBrowserNotification(
+          'User Left',
+          `${data.username} left the chat`,
+          '/user-icon.png'
+        );
       });
 
-      // Listen for room updates
       newSocket.on('roomList', (rooms) => {
         setChatRooms(rooms);
       });
 
       newSocket.on('roomCreated', (data) => {
-        setMessages(prev => ({
-          ...prev,
-          [activeRoom]: [...(prev[activeRoom] || []), {
-            type: 'notification',
-            message: `Room #${data.roomName} created by ${data.creator}`,
-            timestamp: new Date().toISOString()
-          }]
-        }));
+        if (activeRoom) {
+          setMessages(prev => ({
+            ...prev,
+            [activeRoom]: [...(prev[activeRoom] || []), {
+              type: 'notification',
+              message: `Room #${data.roomName} created by ${data.creator}`,
+              timestamp: new Date().toISOString()
+            }]
+          }));
+        }
       });
 
       return () => {
         newSocket.disconnect();
       };
-    }
-  }, [username, activeRoom]);
+    };
 
-  const joinChat = () => {
-    if (username.trim()) {
-      setIsJoined(true);
-    }
-  };
-
-  const sendMessage = () => {
-    if (message.trim() && socket) {
-      if (activeChat === 'global') {
-        // Send to current room
-        socket.emit('sendMessage', { 
-          message, 
-          username, 
-          room: activeRoom 
-        });
-      } else {
-        // Send private message
-        socket.emit('privateMessage', {
-          message,
-          sender: username,
-          receiver: activeChat,
-          timestamp: new Date().toISOString()
-        });
+    const handleJoinRoom = (roomName) => {
+      if (socket && roomName) {
+        socket.emit('joinRoom', { roomName });
       }
-      setMessage('');
-    }
-  };
+    };
 
-  const handleTyping = (e) => {
-    setMessage(e.target.value);
-    
-    if (socket && activeChat === 'global') {
-      socket.emit('typing', { username, room: activeRoom });
+    const handleFileUpload = async (file) => {
+      setUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
       
-      clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = setTimeout(() => {
-        socket.emit('stopTyping', { username, room: activeRoom });
-      }, 1000);
-    }
-  };
-
-  const startPrivateChat = (targetUser) => {
-    if (targetUser !== username) {
-      setActiveChat(targetUser);
-      if (!privateChats.includes(targetUser)) {
-        setPrivateChats(prev => [...prev, targetUser]);
+      try {
+        const response = await fetch('http://localhost:5000/upload', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const fileData = await response.json();
+        
+        socket.emit('file_message', {
+          file: fileData,
+          room: activeRoom
+        });
+        
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      } catch (error) {
+        console.error('File upload failed:', error);
+      } finally {
+        setUploading(false);
       }
-      // Clear unread count
+    };
+
+    const handleFileSelect = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        handleFileUpload(file);
+      }
+    };
+
+    const handleReaction = (messageId, emoji) => {
+      if (socket && activeRoom) {
+        socket.emit('addReaction', {
+          messageId,
+          emoji,
+          room: activeRoom
+        });
+      }
+    };
+
+    const sendMessage = () => {
+      if (message.trim() && socket) {
+        if (activeChat === 'global') {
+          socket.emit('sendMessage', { 
+            message, 
+            username: user?.username, 
+            room: activeRoom 
+          });
+        } else {
+          socket.emit('privateMessage', {
+            message,
+            sender: user?.username,
+            receiver: activeChat,
+            timestamp: new Date().toISOString()
+          });
+        }
+        setMessage('');
+      }
+    };
+
+    const handleTyping = (e) => {
+      setMessage(e.target.value);
+      
+      if (socket && activeChat === 'global' && activeRoom) {
+        socket.emit('typing', { username: user?.username, room: activeRoom });
+        
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => {
+          socket.emit('stopTyping', { username: user?.username, room: activeRoom });
+        }, 1000);
+      }
+    };
+
+    const startPrivateChat = (targetUser) => {
+      if (targetUser !== user?.username) {
+        setActiveChat(targetUser);
+        if (!privateChats.includes(targetUser)) {
+          setPrivateChats(prev => [...prev, targetUser]);
+        }
+      }
+    };
+
+    // Update unread count when messages arrive
+    const updateUnreadCount = (roomOrUser) => {
+      if (document.hidden) { // Only count if window is not active
+        setUnreadCounts(prev => ({
+          ...prev,
+          [roomOrUser]: (prev[roomOrUser] || 0) + 1
+        }));
+      }
+    };
+
+    // Clear unread count when user switches to a room/chat
+    const clearUnreadCount = (roomOrUser) => {
       setUnreadCounts(prev => ({
         ...prev,
-        [targetUser]: 0
+        [roomOrUser]: 0
       }));
-    }
-  };
+    };
 
-  const switchToRoom = (roomName) => {
-    setActiveRoom(roomName);
-    setActiveChat('global');
-    if (socket) {
-      socket.emit('switchRoom', { username, room: roomName });
-    }
-  };
+    // Update document title with total unread count
+    useEffect(() => {
+      const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
+      document.title = totalUnread > 0 ? `(${totalUnread}) Chat App` : 'Chat App';
+    }, [unreadCounts]);
 
-  const createRoom = () => {
-    if (newRoomName.trim() && socket) {
-      socket.emit('createRoom', { roomName: newRoomName, creator: username });
-      setNewRoomName('');
-      setShowCreateRoom(false);
-    }
-  };
+    const createRoom = () => {
+      if (newRoomName.trim() && socket) {
+        socket.emit('createRoom', { roomName: newRoomName, creator: user?.username });
+        setNewRoomName('');
+        setShowCreateRoom(false);
+      }
+    };
 
-  const getCurrentMessages = () => {
-    if (activeChat === 'global') {
-      return messages[activeRoom] || [];
-    }
-    return messages[activeChat] || [];
-  };
+    const logout = () => {
+      setToken(null);
+      setUser(null);
+      setIsAuthenticated(false);
+      setHasJoinedRoom(false);
+      if (socket) {
+        socket.disconnect();
+        setSocket(null);
+      }
+      setMessages({});
+      setActiveRoom(null);
+      setActiveChat('global');
+      setPrivateChats([]);
+      setOnlineUsers([]);
+      setTypingUsers([]);
+      setUnreadCounts({});
+      setChatRooms([]);
+      setMessageReactions({});
+      setRoomUsers({});
+      setAuthData({ username: '', password: '', email: '' });
+      setAuthError('');
+    };
 
-  const getCurrentTypingUsers = () => {
-    if (activeChat === 'global') {
-      return typingUsers.filter(user => user !== username);
-    }
-    return [];
-  };
+    const getCurrentMessages = () => {
+      if (activeChat === 'global') {
+        return messages[activeRoom] || [];
+      }
+      return messages[activeChat] || [];
+    };
 
-  const formatTime = (timestamp) => {
-    return new Date(timestamp).toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-  };
+    const getCurrentTypingUsers = () => {
+      if (activeChat === 'global') {
+        return typingUsers.filter(u => u !== user?.username);
+      }
+      return [];
+    };
 
-  if (!isJoined) {
+    const formatTime = (timestamp) => {
+      return new Date(timestamp).toLocaleTimeString([], { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+    };
+
+    const renderMessage = (msg, index) => {
+      const messageId = `${msg.timestamp}_${index}`;
+      const reactions = messageReactions[messageId] || {};
+
+      if (msg.type === 'notification') {
+        return (
+          <div key={index} className="flex justify-center my-2">
+            <span className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+              {msg.message}
+            </span>
+          </div>
+        );
+      }
+
+      if (msg.type === 'file') {
+        return (
+          <div key={index} className="mb-4 p-3 bg-white rounded-lg shadow">
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-semibold text-blue-600">{msg.username}</span>
+              <span className="text-xs text-gray-500">{formatTime(msg.timestamp)}</span>
+            </div>
+            <div className="bg-gray-50 p-3 rounded border">
+              <div className="flex items-center space-x-2">
+                <span className="text-2xl">📎</span>
+                <div>
+                  <p className="font-medium">{msg.file.originalname}</p>
+                  <p className="text-sm text-gray-500">{(msg.file.size / 1024).toFixed(1)} KB</p>
+                </div>
+              </div>
+              <a 
+                href={`http://localhost:5000${msg.file.url}`} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="mt-2 inline-block bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 transition-colors"
+              >
+                Download
+              </a>
+            </div>
+            <div className="flex items-center space-x-2 mt-2">
+              {['👍', '❤️', '😂', '😮', '😢', '😡'].map(emoji => (
+                <button
+                  key={emoji}
+                  onClick={() => handleReaction(messageId, emoji)}
+                  className="text-sm hover:scale-110 transition-transform"
+                >
+                  {emoji} {reactions[emoji]?.length || 0}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
+      const isOwnMessage = msg.username === user?.username || msg.sender === user?.username;
+      
+      return (
+        <div key={index} className={`mb-4 ${isOwnMessage ? 'text-right' : 'text-left'}`}>
+          <div className={`inline-block max-w-xs lg:max-w-md p-3 rounded-lg ${
+            isOwnMessage 
+              ? 'bg-blue-500 text-white' 
+              : 'bg-gray-200 text-gray-800'
+          }`}>
+            <div className="font-semibold text-sm mb-1">
+              {msg.username || msg.sender}
+            </div>
+            <div className="break-words">{msg.message}</div>
+            <div className="text-xs opacity-75 mt-1">
+              {formatTime(msg.timestamp)}
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 mt-1 justify-center">
+            {['👍', '❤️', '😂', '😮', '😢', '😡'].map(emoji => (
+              <button
+                key={emoji}
+                onClick={() => handleReaction(messageId, emoji)}
+                className="text-sm hover:scale-110 transition-transform"
+              >
+                {emoji} {reactions[emoji]?.length || 0}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    };
+  // Authentication Screen
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
-        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
+        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20 w-full max-w-md">
           <div className="text-center">
             <h1 className="text-4xl font-bold text-white mb-2">💬 Advanced Chat</h1>
-            <p className="text-white/80 mb-8">Join the conversation with rooms & private messaging</p>
-            <div className="space-y-4">
+            <p className="text-white/80 mb-8">Secure real-time messaging</p>
+            
+            {/* Auth Mode Selector */}
+            <div className="flex space-x-1 mb-6 bg-white/10 rounded-lg p-1">
+              {['login', 'register', 'guest'].map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setAuthMode(mode)}
+                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                    authMode === mode
+                      ? 'bg-white text-blue-600'
+                      : 'text-white/70 hover:text-white'
+                  }`}
+                >
+                  {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            <form onSubmit={handleAuth} className="space-y-4">
+              <div>
+                <input
+                  type="text"
+                  placeholder="Username"
+                  value={authData.username}
+                  onChange={(e) => setAuthData({ ...authData, username: e.target.value })}
+                  autoComplete="username"
+                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30"
+                  required
+                />
+              </div>
+              
+              {authMode !== 'guest' && (
+                <div>
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    value={authData.password}
+                    onChange={(e) => setAuthData({ ...authData, password: e.target.value })}
+                    autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30"
+                    required
+                  />
+                </div>
+              )}
+              
+              {authMode === 'register' && (
+                <div>
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    value={authData.email}
+                    onChange={(e) => setAuthData({ ...authData, email: e.target.value })}
+                    autoComplete="email"
+                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30"
+                    required
+                  />
+                </div>
+              )}
+
+              {authError && (
+                <div className="text-red-300 text-sm bg-red-500/20 p-3 rounded-lg">
+                  {authError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-white/90 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Please wait...' : 
+                  authMode === 'login' ? 'Sign In' :
+                  authMode === 'register' ? 'Create Account' :
+                  'Join as Guest'
+                }
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+    // Room Selection Screen (shown after authentication but before joining a room)
+    if (isAuthenticated && !hasJoinedRoom) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20 w-full max-w-md">
+            <div className="text-center">
+              <h1 className="text-3xl font-bold text-white mb-2">Welcome, {user?.username}!</h1>
+              <p className="text-white/80 mb-6">Choose a room to start chatting</p>
+              
+              {/* Room List */}
+              <div className="space-y-3 mb-6">
+                {chatRooms.map((room) => (
+                  <button
+                    key={room}
+                    onClick={() => handleJoinRoom(room)}
+                    className="w-full p-4 bg-white/10 border border-white/20 rounded-lg text-white hover:bg-white/20 transition-colors text-left"
+                  >
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <div className="font-semibold">#{room}</div>
+                        <div className="text-sm text-white/70">
+                          {roomUsers[room] || 0} users online
+                        </div>
+                      </div>
+                      <div className="text-2xl">
+                        {room === 'general' ? '🌐' : 
+                        room === 'random' ? '🎲' : 
+                        room === 'tech' ? '💻' : '💬'}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Create Room */}
+              <div className="border-t border-white/20 pt-4">
+                {showCreateRoom ? (
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      placeholder="Room name"
+                      value={newRoomName}
+                      onChange={(e) => setNewRoomName(e.target.value)}
+                      className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30"
+                    />
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={createRoom}
+                        className="flex-1 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                      >
+                        Create
+                      </button>
+                      <button
+                        onClick={() => setShowCreateRoom(false)}
+                        className="flex-1 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowCreateRoom(true)}
+                    className="w-full py-3 bg-white/10 border border-white/20 rounded-lg text-white hover:bg-white/20 transition-colors"
+                  >
+                    ➕ Create New Room
+                  </button>
+                )}
+              </div>
+
+              {/* Logout */}
+              <button
+                onClick={logout}
+                className="mt-4 text-white/70 hover:text-white transition-colors text-sm"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Main Chat Interface
+    return (
+      <div className="h-screen bg-gray-100 flex">
+        {/* Sidebar */}
+        <div className="w-80 bg-white shadow-lg flex flex-col">
+          {/* Header */}
+          <div className="p-4 border-b bg-gradient-to-r from-blue-500 to-purple-600 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-lg font-bold">Advanced Chat</h1>
+                <p className="text-sm opacity-80">
+                  {user?.username} {user?.isGuest ? '(Guest)' : ''}
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setNotificationsEnabled(!notificationsEnabled)}
+                  className="text-white/80 hover:text-white transition-colors text-sm"
+                >
+                  {notificationsEnabled ? '🔔' : '🔕'}
+                </button>
+                <button
+                  onClick={logout}
+                  className="text-white/80 hover:text-white transition-colors"
+                >
+                  🚪
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Chat Navigation */}
+          <div className="flex-1 overflow-y-auto">
+            {/* Room Section */}
+            <div className="p-4 border-b">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="font-semibold text-gray-700">Rooms</h2>
+                <button
+                  onClick={() => setShowCreateRoom(true)}
+                  className="text-blue-500 hover:text-blue-600 text-sm"
+                >
+                  ➕
+                </button>
+              </div>
+              
+              {/* Current Room */}
+              {activeRoom && (
+                <div className="mb-2 p-2 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-center justify-between">
+                    <div className="font-medium text-blue-700">#{activeRoom}</div>
+                    <div className="text-sm text-blue-600">
+                      {roomUsers[activeRoom] || 0} users
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Switch Room */}
+              <button
+                onClick={() => setHasJoinedRoom(false)}
+                className="w-full p-2 text-left text-sm text-gray-600 hover:bg-gray-50 rounded"
+              >
+                🔄 Switch Room
+              </button>
+            </div>
+
+            {/* Private Chats */}
+            <div className="p-4 border-b">
+              <h2 className="font-semibold text-gray-700 mb-3">Private Chats</h2>
+              <div className="space-y-1">
+                {privateChats.map((chat) => (
+                  <button
+                    key={chat}
+                    onClick={() => setActiveChat(chat)}
+                    className={`w-full p-2 text-left rounded transition-colors ${
+                      activeChat === chat
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span>{chat}</span>
+                      {unreadCounts[chat] > 0 && (
+                        <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1">
+                          {unreadCounts[chat]}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Online Users */}
+            <div className="p-4">
+              <h2 className="font-semibold text-gray-700 mb-3">
+                Online Users ({onlineUsers.length})
+              </h2>
+              <div className="space-y-2">
+                {onlineUsers.map((username) => (
+                  <div
+                    key={username}
+                    className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer"
+                    onClick={() => startPrivateChat(username)}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className={username === user?.username ? 'font-semibold' : ''}>
+                        {username}
+                      </span>
+                    </div>
+                    {username !== user?.username && (
+                      <button className="text-blue-500 hover:text-blue-600 text-sm">
+                        💬
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Chat Area */}
+        <div className="flex-1 flex flex-col">
+          {/* Chat Header */}
+          <div className="p-4 border-b bg-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-semibold text-gray-800">
+                  {activeChat === 'global' ? `#${activeRoom}` : `Chat with ${activeChat}`}
+                </h2>
+                {activeChat === 'global' && (
+                  <p className="text-sm text-gray-600">
+                    {roomUsers[activeRoom] || 0} users online
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setActiveChat('global')}
+                className={`px-3 py-1 rounded text-sm ${
+                  activeChat === 'global'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                Back to Room
+              </button>
+            </div>
+          </div>
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {getCurrentMessages().map((msg, index) => renderMessage(msg, index))}
+            
+            {/* Typing Indicator */}
+            {getCurrentTypingUsers().length > 0 && (
+              <div className="text-sm text-gray-500 italic">
+                {getCurrentTypingUsers().join(', ')} {getCurrentTypingUsers().length === 1 ? 'is' : 'are'} typing...
+              </div>
+            )}
+            
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Message Input */}
+          <div className="p-4 border-t bg-white">
+            <div className="flex items-center space-x-2">
               <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter your username"
-                className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/40 backdrop-blur-sm"
-                onKeyPress={(e) => e.key === 'Enter' && joinChat()}
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                className="hidden"
+                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
               />
               <button
-                onClick={joinChat}
-                className="w-full bg-white/20 hover:bg-white/30 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200 backdrop-blur-sm border border-white/20"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="p-2 text-gray-500 hover:text-gray-700 disabled:opacity-50"
               >
-                Join Chat
+                {uploading ? '⏳' : '📎'}
+              </button>
+              <input
+                type="text"
+                value={message}
+                onChange={handleTyping}
+                onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                placeholder={`Message ${activeChat === 'global' ? `#${activeRoom}` : activeChat}`}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={sendMessage}
+                disabled={!message.trim()}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Send
               </button>
             </div>
           </div>
         </div>
       </div>
     );
-  }
+  };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex">
-      {/* Sidebar */}
-      <div className="w-80 bg-gray-800/50 backdrop-blur-sm border-r border-gray-700/50 flex flex-col">
-        {/* Chat Rooms */}
-        <div className="p-4 border-b border-gray-700/50">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-white">🏠 Chat Rooms</h2>
-            <button
-              onClick={() => setShowCreateRoom(!showCreateRoom)}
-              className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded-lg text-sm transition-colors"
-            >
-              +
-            </button>
-          </div>
-          
-          {showCreateRoom && (
-            <div className="mb-4 space-y-2">
-              <input
-                type="text"
-                value={newRoomName}
-                onChange={(e) => setNewRoomName(e.target.value)}
-                placeholder="Room name"
-                className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                onKeyPress={(e) => e.key === 'Enter' && createRoom()}
-              />
-              <button
-                onClick={createRoom}
-                className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm transition-colors"
-              >
-                Create Room
-              </button>
-            </div>
-          )}
-          
-          <div className="space-y-1">
-            {chatRooms.map((room) => (
-              <button
-                key={room}
-                onClick={() => switchToRoom(room)}
-                className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center justify-between ${
-                  activeRoom === room && activeChat === 'global'
-                    ? 'bg-purple-600 text-white'
-                    : 'text-gray-300 hover:bg-gray-700'
-                }`}
-              >
-                <span># {room}</span>
-                <span className="text-xs text-gray-400">
-                  {roomUsers[room] || 0}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Private Chats */}
-        <div className="p-4 border-b border-gray-700/50">
-          <h2 className="text-xl font-bold text-white mb-4">💬 Private Chats</h2>
-          <div className="space-y-1">
-            {privateChats.map((chatUser) => (
-              <button
-                key={chatUser}
-                onClick={() => setActiveChat(chatUser)}
-                className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center justify-between ${
-                  activeChat === chatUser
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-300 hover:bg-gray-700'
-                }`}
-              >
-                <span>{chatUser}</span>
-                {unreadCounts[chatUser] > 0 && (
-                  <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1 min-w-[1.5rem] text-center">
-                    {unreadCounts[chatUser]}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Online Users */}
-        <div className="p-4 flex-1">
-          <h2 className="text-xl font-bold text-white mb-4">
-            👥 Online Users ({onlineUsers.length})
-          </h2>
-          <div className="space-y-2">
-            {onlineUsers.map((user) => (
-              <div key={user} className="flex items-center justify-between p-2 bg-gray-700/30 rounded-lg">
-                <span className={`${user === username ? 'text-yellow-400 font-semibold' : 'text-gray-300'}`}>
-                  {user === username ? `${user} (You)` : user}
-                </span>
-                {user !== username && (
-                  <button
-                    onClick={() => startPrivateChat(user)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs transition-colors"
-                  >
-                    Chat
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
-        {/* Chat Header */}
-        <div className="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700/50 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-white">
-                {activeChat === 'global' ? `# ${activeRoom}` : `💬 ${activeChat}`}
-              </h1>
-              <p className="text-gray-400 text-sm">
-                {activeChat === 'global' 
-                  ? `${roomUsers[activeRoom] || 0} users in room`
-                  : 'Private conversation'
-                }
-              </p>
-            </div>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => setActiveChat('global')}
-                className={`px-4 py-2 rounded-lg transition-colors ${
-                  activeChat === 'global'
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-              >
-                🌍 Global
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Messages */}
-        <div className="flex-1 p-4 overflow-y-auto">
-          <div className="space-y-4">
-            {getCurrentMessages().map((msg, index) => {
-              const messageId = `${msg.timestamp}_${msg.username || msg.sender}`;
-              const reactions = messageReactions[messageId] || {};
-
-              return (
-                <div key={index} className={`flex items-start space-x-3 ${
-                  msg.type === 'notification' ? 'justify-center' : ''
-                }`}>
-                  {msg.type === 'notification' ? (
-                    <div className="bg-gray-600/50 text-gray-300 px-4 py-2 rounded-full text-sm">
-                      {msg.message}
-                    </div>
-                  ) : msg.type === 'file' ? (
-                    // FILE MESSAGE RENDERING
-                    <>
-                      <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                        {(msg.username || 'U')[0].toUpperCase()}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-1">
-                          <span className="font-semibold text-white">{msg.username}</span>
-                          <span className="text-gray-400 text-xs">{formatTime(msg.timestamp)}</span>
-                        </div>
-                        <div className="bg-gray-700/50 backdrop-blur-sm rounded-lg p-4">
-                          {msg.file.mimetype.startsWith('image/') ? (
-                            <img 
-                              src={`http://localhost:5000${msg.file.url}`}
-                              alt={msg.file.originalname}
-                              className="max-w-sm max-h-64 rounded-lg cursor-pointer hover:opacity-80 transition-opacity"
-                              onClick={() => window.open(`http://localhost:5000${msg.file.url}`, '_blank')}
-                            />
-                          ) : (
-                            <div className="flex items-center space-x-3 p-3 bg-gray-600/50 rounded-lg">
-                              <span className="text-3xl">📄</span>
-                              <div className="flex-1">
-                                <p className="font-medium text-white">{msg.file.originalname}</p>
-                                <p className="text-xs text-gray-400">
-                                  {(msg.file.size / 1024 / 1024).toFixed(2)} MB
-                                </p>
-                              </div>
-                              <a
-                                href={`http://localhost:5000${msg.file.url}`}
-                                download={msg.file.originalname}
-                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm transition-colors"
-                              >
-                                Download
-                              </a>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    // REGULAR MESSAGE RENDERING
-                    <>
-                      <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                        {(msg.username || msg.sender || 'U')[0].toUpperCase()}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-1">
-                          <span className="font-semibold text-white">
-                            {msg.username || msg.sender}
-                          </span>
-                          <span className="text-gray-400 text-xs">
-                            {formatTime(msg.timestamp)}
-                          </span>
-                        </div>
-                        <div className="bg-gray-700/50 backdrop-blur-sm rounded-lg px-4 py-2 text-gray-100 relative group">
-                          {msg.message}
-                          
-                          {/* Reaction Button */}
-                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <div className="flex space-x-1">
-                              {['👍', '❤️', '😂', '😮', '😢', '😡'].map((emoji) => (
-                                <button
-                                  key={emoji}
-                                  onClick={() => handleReaction(messageId, emoji)}
-                                  className="hover:bg-gray-600 rounded px-1 py-0.5 text-sm transition-colors"
-                                >
-                                  {emoji}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                        
-                        {/* Display Reactions */}
-                        {Object.keys(reactions).length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-2">
-                            {Object.entries(reactions).map(([emoji, users]) => (
-                              <div
-                                key={emoji}
-                                className="bg-gray-600/50 rounded-full px-2 py-1 text-xs flex items-center space-x-1 cursor-pointer hover:bg-gray-600/70 transition-colors"
-                                onClick={() => handleReaction(messageId, emoji)}
-                                title={`${users.join(', ')}`}
-                              >
-                                <span>{emoji}</span>
-                                <span className="text-gray-300">{users.length}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-            
-            {getCurrentTypingUsers().length > 0 && (
-              <div className="flex items-center space-x-2 text-gray-400 text-sm">
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                </div>
-                <span>
-                  {getCurrentTypingUsers().join(', ')} {getCurrentTypingUsers().length === 1 ? 'is' : 'are'} typing...
-                </span>
-              </div>
-            )}
-          </div>
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Message Input */}
-        <div className="bg-gray-800/50 backdrop-blur-sm border-t border-gray-700/50 p-4">
-          <div className="flex items-center space-x-3">
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-              className="hidden"
-              accept="image/*,video/*,audio/*,.pdf,.txt,.docx"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className={`p-3 rounded-xl transition-all ${
-                uploading 
-                  ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
-                  : 'bg-gray-700 text-white hover:bg-gray-600'
-              }`}
-              title="Upload file"
-            >
-              {uploading ? '⏳' : '📎'}
-            </button>
-            <input
-              type="text"
-              value={message}
-              onChange={handleTyping}
-              placeholder={
-                activeChat === 'global' 
-                  ? `Message #${activeRoom}...` 
-                  : `Message ${activeChat}...`
-              }
-              className="flex-1 px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 backdrop-blur-sm"
-              onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-            />
-            <button
-              onClick={sendMessage}
-              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-6 py-3 rounded-xl transition-all duration-200 font-semibold shadow-lg"
-            >
-              Send
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default ChatApp;
+  export default ChatApp;
