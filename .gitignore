@@ -17,3 +17,5 @@ pnpm-debug.log*
 # OS stuff
 .DS_Store
 Thumbs.db
+
+.env
