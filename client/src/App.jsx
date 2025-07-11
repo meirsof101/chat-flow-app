@@ -497,18 +497,7 @@ const sendMessage = () => {
       }
       return [];
     };
-
-    const formatTime = (timestamp) => {
-      return new Date(timestamp).toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-    };
-
-    const renderMessage = (msg, index) => {
-      const messageId = `${msg.timestamp}_${index}`;
-      const reactions = messageReactions[messageId] || {};
-      const loadOlderMessages = () => {
+    const loadOlderMessages = () => {
       if (socket && !loadingOlderMessages && hasMoreMessages) {
         setLoadingOlderMessages(true);
         socket.emit('loadOlderMessages', {
@@ -518,6 +507,17 @@ const sendMessage = () => {
         });
       }
     };
+    const formatTime = (timestamp) => {
+      return new Date(timestamp).toLocaleTimeString([], { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+    };
+
+   const renderMessage = (msg, index) => {
+    const messageId = `${msg.timestamp}_${index}`;
+    const reactions = messageReactions[messageId] || {};
+
       if (msg.type === 'notification') {
         return (
           <div key={index} className="flex justify-center my-2">
@@ -527,7 +527,6 @@ const sendMessage = () => {
           </div>
         );
       }
-
       if (msg.type === 'file') {
         return (
           <div key={index} className="mb-4 p-3 bg-white rounded-lg shadow">
@@ -598,6 +597,7 @@ const sendMessage = () => {
         </div>
       );
     };
+
   // Authentication Screen
   if (!isAuthenticated) {
     return (
@@ -1007,6 +1007,5 @@ const sendMessage = () => {
         </div>
       </div>
     );
-  };
-
-  export default ChatApp;
+  }
+export default ChatApp;
