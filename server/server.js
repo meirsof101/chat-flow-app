@@ -10,12 +10,17 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 const server = http.createServer(app);
+// Update your io configuration
 const io = socketIo(server, {
   cors: {
     origin: "http://localhost:5173",
     methods: ["GET", "POST"],
     credentials: true
-  }
+  },
+  // Add reconnection settings
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  transports: ['websocket', 'polling']
 });
 
 // Middleware
@@ -321,24 +326,43 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle sending messages to rooms
-  socket.on('sendMessage', (messageData) => {
-    const user = connectedUsers.get(socket.id);
-    if (user && user.currentRoom) {
-      const message = {
-        username: user.username,
-        message: messageData.message,
-        timestamp: new Date().toISOString(),
-        room: user.currentRoom
-      };
-      
-      console.log(`Message from ${user.username} in room ${message.room}:`, message.message);
-      
-      // Broadcast to all users in the room
-      io.to(message.room).emit('message', message);
-    }
-  });
+  // Add after your existing socket handlers
 
+// Handle loading older messages
+socket.on('loadOlderMessages', (data, callback) => {
+  const { room, offset, limit } = data;
+  // In production, you'd query your database here
+  // For now, return empty array since we don't have message persistence
+  const olderMessages = [];
+  const hasMore = false;
+  
+  socket.emit('olderMessages', {
+    room,
+    messages: olderMessages,
+    hasMore
+  });
+});
+
+// Update your message handlers to include acknowledgments
+socket.on('sendMessage', (messageData, callback) => {
+  const user = connectedUsers.get(socket.id);
+  if (user && user.currentRoom) {
+    const message = {
+      id: messageData.id,
+      username: user.username,
+      message: messageData.message,
+      timestamp: new Date().toISOString(),
+      room: user.currentRoom
+    };
+    
+    io.to(message.room).emit('message', message);
+    
+    // Send acknowledgment
+    if (callback) {
+      callback({ success: true, messageId: message.id });
+    }
+  }
+});
   // Handle file messages
   socket.on('file_message', (data) => {
     const user = connectedUsers.get(socket.id);

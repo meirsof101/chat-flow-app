@@ -35,7 +35,15 @@
     const fileInputRef = useRef(null);
     const [notificationsEnabled, setNotificationsEnabled] = useState(true);
     const [notificationPermission, setNotificationPermission] = useState(false);
-
+    const [messageLimit, setMessageLimit] = useState(50);
+    const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+    const [hasMoreMessages, setHasMoreMessages] = useState(true);
+    const [connectionStatus, setConnectionStatus] = useState('connected');
+    const [reconnectAttempts, setReconnectAttempts] = useState(0);
+    const [searchQuery, setSearchQuery] = useState('');
+const [searchResults, setSearchResults] = useState([]);
+const [isSearching, setIsSearching] = useState(false);  
+const [pendingMessages, setPendingMessages] = useState(new Map());
     const scrollToBottom = () => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
@@ -66,8 +74,21 @@
           badge: '/favicon.ico'
         });
       }
-    };
-
+      };
+    const searchMessages = (query) => {
+      if (!query.trim()) {
+        setSearchResults([]);
+        return;
+      }
+      
+      setIsSearching(true);
+      const currentMessages = getCurrentMessages();
+      const results = currentMessages.filter(msg => 
+        msg.message && msg.message.toLowerCase().includes(query.toLowerCase())
+      );
+    setSearchResults(results);
+    setIsSearching(false);
+  };
     const handleAuth = async (e) => {
       e.preventDefault();
       setLoading(true);
@@ -119,7 +140,15 @@
           ...prev,
           [data.room || 'general']: [...(prev[data.room || 'general'] || []), data]
         }));
-
+        newSocket.on('olderMessages', (data) => {
+      const { room, messages, hasMore } = data;
+      setMessages(prev => ({
+        ...prev,
+        [room]: [...messages, ...(prev[room] || [])]
+      }));
+      setHasMoreMessages(hasMore);
+      setLoadingOlderMessages(false);
+    });
         // Handle notifications for new messages
         if (data.sender && user && data.sender !== user.username) {
           playNotificationSound();
@@ -238,8 +267,24 @@
           '/user-icon.png'
         );
       });
+      newSocket.on('disconnect', () => {
+        setConnectionStatus('disconnected');
+      });
 
-      newSocket.on('roomList', (rooms) => {
+      newSocket.on('reconnect', () => {
+        setConnectionStatus('connected');
+        setReconnectAttempts(0);
+      });
+
+      newSocket.on('reconnect_attempt', (attemptNumber) => {
+        setConnectionStatus('reconnecting');
+        setReconnectAttempts(attemptNumber);
+      });
+
+      newSocket.on('reconnect_failed', () => {
+        setConnectionStatus('failed');
+      });
+            newSocket.on('roomList', (rooms) => {
         setChatRooms(rooms);
       });
 
@@ -255,6 +300,11 @@
           }));
         }
       });
+      newSocket.on('connect', () => {
+  setConnectionStatus('connected');
+  setReconnectAttempts(0);
+});
+
 
       return () => {
         newSocket.disconnect();
@@ -313,25 +363,49 @@
       }
     };
 
-    const sendMessage = () => {
-      if (message.trim() && socket) {
-        if (activeChat === 'global') {
-          socket.emit('sendMessage', { 
-            message, 
-            username: user?.username, 
-            room: activeRoom 
-          });
-        } else {
-          socket.emit('privateMessage', {
-            message,
-            sender: user?.username,
-            receiver: activeChat,
-            timestamp: new Date().toISOString()
+const sendMessage = () => {
+  if (message.trim() && socket) {
+    const messageId = `${Date.now()}_${Math.random()}`;
+    const messageData = {
+      id: messageId,
+      message,
+      username: user?.username,
+      timestamp: new Date().toISOString(),
+      status: 'sending'
+    };
+
+    if (activeChat === 'global') {
+      socket.emit('sendMessage', { 
+        ...messageData,
+        room: activeRoom 
+      }, (acknowledgment) => {
+        if (acknowledgment.success) {
+          setPendingMessages(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(messageId);
+            return newMap;
           });
         }
-        setMessage('');
-      }
-    };
+      });
+    } else {
+      socket.emit('privateMessage', {
+        ...messageData,
+        receiver: activeChat
+      }, (acknowledgment) => {
+        if (acknowledgment.success) {
+          setPendingMessages(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(messageId);
+            return newMap;
+          });
+        }
+      });
+    }
+
+    setPendingMessages(prev => new Map(prev).set(messageId, messageData));
+    setMessage('');
+  }
+};
 
     const handleTyping = (e) => {
       setMessage(e.target.value);
@@ -434,7 +508,16 @@
     const renderMessage = (msg, index) => {
       const messageId = `${msg.timestamp}_${index}`;
       const reactions = messageReactions[messageId] || {};
-
+      const loadOlderMessages = () => {
+      if (socket && !loadingOlderMessages && hasMoreMessages) {
+        setLoadingOlderMessages(true);
+        socket.emit('loadOlderMessages', {
+          room: activeChat === 'global' ? activeRoom : activeChat,
+          offset: getCurrentMessages().length,
+          limit: 50
+        });
+      }
+    };
       if (msg.type === 'notification') {
         return (
           <div key={index} className="flex justify-center my-2">
@@ -702,6 +785,29 @@
                   {user?.username} {user?.isGuest ? '(Guest)' : ''}
                 </p>
               </div>
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${
+                connectionStatus === 'connected' ? 'bg-green-500' : 
+                connectionStatus === 'reconnecting' ? 'bg-yellow-500' : 'bg-red-500'
+              }`}></div>
+              <span className="text-sm text-gray-600">
+                {connectionStatus === 'connected' ? 'Connected' :
+                connectionStatus === 'reconnecting' ? `Reconnecting... (${reconnectAttempts})` :
+                connectionStatus === 'failed' ? 'Connection failed' : 'Disconnected'}
+              </span>
+            </div>
+            <div className="flex-1 max-w-md mx-4">
+  <input
+    type="text"
+    placeholder="Search messages..."
+    value={searchQuery}
+    onChange={(e) => {
+      setSearchQuery(e.target.value);
+      searchMessages(e.target.value);
+    }}
+    className="w-full px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+  />
+</div>
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => setNotificationsEnabled(!notificationsEnabled)}
@@ -841,6 +947,17 @@
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {hasMoreMessages && (
+              <div className="text-center py-2">
+                <button
+                  onClick={loadOlderMessages}
+                  disabled={loadingOlderMessages}
+                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                >
+                  {loadingOlderMessages ? 'Loading...' : 'Load Older Messages'}
+                </button>
+              </div>
+            )}
             {getCurrentMessages().map((msg, index) => renderMessage(msg, index))}
             
             {/* Typing Indicator */}
