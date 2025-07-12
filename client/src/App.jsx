@@ -106,7 +106,7 @@ const [pendingMessages, setPendingMessages] = useState(new Map());
           payload = { username: authData.username };
         }
 
-        const response = await fetch(`http://localhost:5000${endpoint}`, {
+        const response = await fetch(`https://week-5-web-sockets-assignment-meirsof101.onrender.com${endpoint}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -130,9 +130,11 @@ const [pendingMessages, setPendingMessages] = useState(new Map());
     };
 
     const connectSocket = (authToken) => {
-      const newSocket = io('http://localhost:5000', {
-        auth: { token: authToken }
+      const newSocket = io('https://week-5-web-sockets-assignment-meirsof101.onrender.com', {
+        auth: { token: authToken },
+        transports: ['websocket', 'polling']
       });
+
       setSocket(newSocket);
 
       newSocket.on('message', (data) => {
