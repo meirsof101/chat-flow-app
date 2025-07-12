@@ -1,5 +1,5 @@
   import React, { useState, useEffect, useRef } from 'react';
-  import io from 'socket.io-client';
+  import { io } from 'socket.io-client';
 
   const ChatApp = () => {
     const [socket, setSocket] = useState(null);
@@ -148,6 +148,12 @@ const [pendingMessages, setPendingMessages] = useState(new Map());
       }));
       setHasMoreMessages(hasMore);
       setLoadingOlderMessages(false);
+    });
+        newSocket.on('roomHistory', (data) => {
+      setMessages(prev => ({
+        ...prev,
+        [data.room]: data.messages
+      }));
     });
         // Handle notifications for new messages
         if (data.sender && user && data.sender !== user.username) {
@@ -785,29 +791,29 @@ const sendMessage = () => {
                   {user?.username} {user?.isGuest ? '(Guest)' : ''}
                 </p>
               </div>
-            <div className="flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${
-                connectionStatus === 'connected' ? 'bg-green-500' : 
-                connectionStatus === 'reconnecting' ? 'bg-yellow-500' : 'bg-red-500'
-              }`}></div>
-              <span className="text-sm text-gray-600">
-                {connectionStatus === 'connected' ? 'Connected' :
-                connectionStatus === 'reconnecting' ? `Reconnecting... (${reconnectAttempts})` :
-                connectionStatus === 'failed' ? 'Connection failed' : 'Disconnected'}
-              </span>
-            </div>
+  
             <div className="flex-1 max-w-md mx-4">
-  <input
-    type="text"
-    placeholder="Search messages..."
-    value={searchQuery}
-    onChange={(e) => {
-      setSearchQuery(e.target.value);
-      searchMessages(e.target.value);
-    }}
-    className="w-full px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-  />
-</div>
+              <input
+                type="text"
+                placeholder="Search messages..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  searchMessages(e.target.value);
+                }}
+                className="w-full px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {searchResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto z-10">
+                  {searchResults.map((msg, index) => (
+                    <div key={index} className="p-2 hover:bg-gray-50 border-b">
+                      <div className="text-sm font-medium">{msg.username}</div>
+                      <div className="text-sm text-gray-600">{msg.message}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => setNotificationsEnabled(!notificationsEnabled)}
@@ -822,6 +828,17 @@ const sendMessage = () => {
                   🚪
                 </button>
               </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${
+                connectionStatus === 'connected' ? 'bg-green-500' : 
+                connectionStatus === 'reconnecting' ? 'bg-yellow-500' : 'bg-red-500'
+              }`}></div>
+              <span className="text-sm text-gray-600">
+                {connectionStatus === 'connected' ? 'Connected' :
+                connectionStatus === 'reconnecting' ? `Reconnecting... (${reconnectAttempts})` :
+                connectionStatus === 'failed' ? 'Connection failed' : 'Disconnected'}
+              </span>
             </div>
           </div>
 

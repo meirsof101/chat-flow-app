@@ -16,7 +16,7 @@ const server = http.createServer(app);
 // Socket.IO configuration
 const io = socketIo(server, {
   cors: {
-    origin: "https://blog-app-one-drab-13.vercel.app",
+    origin: "*",
     methods: ["GET", "POST"],
     credentials: true
   },
@@ -551,12 +551,30 @@ io.on('connection', (socket) => {
       }
     }
   });
+socket.on('loadOlderMessages', async (data) => {
+  try {
+    const { room, offset, limit } = data;
+    const messages = await Message.find({ room })
+      .sort({ timestamp: -1 })
+      .skip(offset)
+      .limit(limit)
+      .exec();
+    
+    socket.emit('olderMessages', {
+      room,
+      messages: messages.reverse(),
+      hasMore: messages.length === limit
+    });
+  } catch (error) {
+    console.error('Error loading older messages:', error);
+  }
+});
 
-  // Handle typing indicators
-  socket.on('typing', (data) => {
-    const user = connectedUsers.get(socket.id);
-    if (user && user.currentRoom) {
-      socket.to(user.currentRoom).emit('userTyping', { 
+// Handle typing indicators
+socket.on('typing', (data) => {
+  const user = connectedUsers.get(socket.id);
+  if (user && user.currentRoom) {
+    socket.to(user.currentRoom).emit('userTyping', {
         username: user.username,
         room: user.currentRoom
       });
