@@ -49,6 +49,8 @@ const [pendingMessages, setPendingMessages] = useState(new Map());
     const [readReceipts, setReadReceipts] = useState({});
     const [showReadReceipts, setShowReadReceipts] = useState(false);
     const [selectedMessageId, setSelectedMessageId] = useState(null);
+    const [showMobileMenu, setShowMobileMenu] = useState(false);
+    const [showMobileSearch, setShowMobileSearch] = useState(false);
     const scrollToBottom = () => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
