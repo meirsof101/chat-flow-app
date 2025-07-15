@@ -8,10 +8,16 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
+const OpenAI = require('openai');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
+
+// Initialize OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // Socket.IO configuration
 const io = socketIo(server, {
@@ -57,6 +63,11 @@ const userSchema = new mongoose.Schema({
   createdAt: { 
     type: Date, 
     default: Date.now 
+  },
+  theme: {
+    type: String,
+    enum: ['light', 'dark'],
+    default: 'light'
   }
 });
 
@@ -90,10 +101,75 @@ const messageSchema = new mongoose.Schema({
   timestamp: { 
     type: Date, 
     default: Date.now 
-  }
+  },
+  readBy: [{
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    username: String,
+    readAt: {
+      type: Date,
+      default: Date.now
+    }
+  }]
 });
 
 const Message = mongoose.model('Message', messageSchema);
+
+// Read Receipt Schema
+const readReceiptSchema = new mongoose.Schema({
+  messageId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Message',
+    required: true
+  },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  username: {
+    type: String,
+    required: true
+  },
+  room: {
+    type: String,
+    required: true
+  },
+  readAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+readReceiptSchema.index({ messageId: 1, userId: 1 }, { unique: true });
+const ReadReceipt = mongoose.model('ReadReceipt', readReceiptSchema);
+
+// ChatGPT Integration
+const generateAIResponse = async (message, context = []) => {
+  try {
+    const systemPrompt = `You are a helpful AI assistant in a chat room. Keep responses concise and friendly. You can engage in casual conversation, answer questions, and help with various topics. Your name is ChatGPT Bot.`;
+    
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...context.slice(-5), // Keep last 5 messages for context
+      { role: 'user', content: message }
+    ];
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: messages,
+      max_tokens: 200,
+      temperature: 0.7,
+    });
+
+    return response.choices[0].message.content;
+  } catch (error) {
+    console.error('OpenAI API error:', error);
+    return "Sorry, I'm having trouble responding right now. Please try again later.";
+  }
+};
 
 // Middleware
 app.use(cors());
@@ -210,7 +286,7 @@ app.post('/api/login', async (req, res) => {
     res.json({
       message: 'Login successful',
       token,
-      user: { username, email: user.email, userId: user._id }
+      user: { username, email: user.email, userId: user._id, theme: user.theme }
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -292,6 +368,48 @@ app.get('/api/users/online', async (req, res) => {
   } catch (error) {
     console.error('Error fetching online users:', error);
     res.status(500).json({ error: 'Failed to fetch online users' });
+  }
+});
+
+// Update user theme
+app.put('/api/user/theme', async (req, res) => {
+  try {
+    const { theme } = req.body;
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({ error: 'No token provided' });
+    }
+    
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await User.findById(decoded.userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    user.theme = theme;
+    await user.save();
+    
+    res.json({ message: 'Theme updated successfully', theme });
+  } catch (error) {
+    console.error('Theme update error:', error);
+    res.status(500).json({ error: 'Failed to update theme' });
+  }
+});
+
+// Get message read receipts
+app.get('/api/message/:messageId/receipts', async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const receipts = await ReadReceipt.find({ messageId })
+      .select('username readAt')
+      .sort({ readAt: -1 });
+    
+    res.json({ receipts });
+  } catch (error) {
+    console.error('Error fetching read receipts:', error);
+    res.status(500).json({ error: 'Failed to fetch read receipts' });
   }
 });
 
@@ -448,14 +566,57 @@ io.on('connection', (socket) => {
           room: user.currentRoom,
           type: 'text'
         });
-        await newMessage.save();
+        const savedMessage = await newMessage.save();
+        
+        // Add message ID to response
+        message.id = savedMessage._id;
         
         // Broadcast to room
         io.to(message.room).emit('message', message);
         
+        // Check if message mentions AI bot
+        if (messageData.message.toLowerCase().includes('@chatgpt') || 
+            messageData.message.toLowerCase().includes('chatgpt')) {
+          
+          // Get recent messages for context
+          const recentMessages = await Message.find({ room: user.currentRoom })
+            .sort({ timestamp: -1 })
+            .limit(10)
+            .exec();
+          
+          const context = recentMessages.reverse().map(msg => ({
+            role: msg.username === 'ChatGPT Bot' ? 'assistant' : 'user',
+            content: msg.message
+          }));
+          
+          // Generate AI response
+          const aiResponse = await generateAIResponse(messageData.message, context);
+          
+          // Save AI response to database
+          const aiMessage = new Message({
+            username: 'ChatGPT Bot',
+            message: aiResponse,
+            room: user.currentRoom,
+            type: 'text'
+          });
+          const savedAiMessage = await aiMessage.save();
+          
+          // Broadcast AI response
+          setTimeout(() => {
+            io.to(message.room).emit('message', {
+              id: savedAiMessage._id,
+              username: 'ChatGPT Bot',
+              message: aiResponse,
+              timestamp: new Date().toISOString(),
+              room: user.currentRoom,
+              type: 'ai'
+            });
+          }, 1000); // Delay to simulate typing
+        }
+        
         // Send acknowledgment
         if (callback) {
-          callback({ success: true, messageId: message.id });
+          callback({ success: true, messageId: savedMessage._id });
         }
       } catch (error) {
         console.error('Error saving message:', error);
@@ -588,6 +749,81 @@ socket.on('typing', (data) => {
         username: user.username,
         room: user.currentRoom
       });
+    }
+  });
+
+  // Handle message read receipts
+  socket.on('markMessageAsRead', async (data) => {
+    const user = connectedUsers.get(socket.id);
+    if (user && user.userId) {
+      try {
+        const { messageId, room } = data;
+        
+        // Create or update read receipt
+        await ReadReceipt.findOneAndUpdate(
+          { messageId, userId: user.userId },
+          {
+            messageId,
+            userId: user.userId,
+            username: user.username,
+            room,
+            readAt: new Date()
+          },
+          { upsert: true }
+        );
+        
+        // Also update the message's readBy array
+        await Message.findByIdAndUpdate(messageId, {
+          $addToSet: {
+            readBy: {
+              userId: user.userId,
+              username: user.username,
+              readAt: new Date()
+            }
+          }
+        });
+        
+        // Broadcast read receipt to room
+        io.to(room).emit('messageRead', {
+          messageId,
+          username: user.username,
+          readAt: new Date().toISOString()
+        });
+        
+      } catch (error) {
+        console.error('Error marking message as read:', error);
+      }
+    }
+  });
+  
+  // Handle theme updates
+  socket.on('updateTheme', async (data) => {
+    const user = connectedUsers.get(socket.id);
+    if (user && user.userId) {
+      try {
+        const { theme } = data;
+        await User.findByIdAndUpdate(user.userId, { theme });
+        socket.emit('themeUpdated', { theme });
+      } catch (error) {
+        console.error('Error updating theme:', error);
+      }
+    }
+  });
+  
+  // Handle getting read receipts for a message
+  socket.on('getReadReceipts', async (data) => {
+    try {
+      const { messageId } = data;
+      const receipts = await ReadReceipt.find({ messageId })
+        .select('username readAt')
+        .sort({ readAt: -1 });
+      
+      socket.emit('readReceipts', {
+        messageId,
+        receipts
+      });
+    } catch (error) {
+      console.error('Error getting read receipts:', error);
     }
   });
 

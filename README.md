@@ -1,322 +1,289 @@
-# 💬 Advanced Real-Time Chat Application
+# 🚀 Advanced Real-Time Chat Application
 
-A modern, full-featured real-time chat application built with React, Node.js, Express, Socket.io, and MongoDB. This application provides secure authentication, real-time messaging, file sharing, and advanced chat features.
+A full-stack real-time chat application built with the MERN stack, enhanced with Socket.IO for instant messaging, OpenAI integration, and modern UI features.
 
-### 🚀 Live Demo
-Client (Frontend): https://blog-app-one-drab-13.vercel.app/
-Server (Backend API): https://week-5-web-sockets-assignment-meirsof101.onrender.com
-
-## 🚀 Features
+## ✨ Features
 
 ### Core Features
-- **Real-time messaging** with Socket.io
-- **User authentication** (Register, Login, Guest mode)
-- **Multiple chat rooms** with dynamic room creation
-- **Private messaging** between users
-- **File sharing** (images, videos, documents)
-- **Message reactions** with emoji support
-- **Typing indicators** in real-time
-- **Online/offline status** tracking
-- **Message history** with pagination
+- **🔐 User Authentication** - JWT-based authentication with login, register, and guest modes
+- **💬 Real-time Messaging** - Instant messaging via Socket.IO with automatic reconnection
+- **🏢 Group Chats** - Multiple chat rooms with dynamic room creation
+- **👥 Private Messages** - One-on-one messaging with unread indicators
+- **📚 Message History** - Persistent message storage with pagination
+- **⌨️ Typing Indicators** - Real-time typing status with timeout detection
+- **🔔 Notifications** - Browser notifications and sound alerts
+- **📎 File Sharing** - Upload and share images, documents, and media files
+- **😊 Message Reactions** - React to messages with emojis
+- **🔍 Message Search** - Search through chat history
 
-### Advanced Features
-- **JWT-based authentication** with secure token management
-- **MongoDB integration** for persistent data storage
-- **Connection status monitoring** with reconnection logic
-- **Browser notifications** with sound alerts
-- **Message search functionality** across chat history
-- **Unread message counters** for all chats
-- **Responsive design** for desktop and mobile
-- **Guest user support** for quick access
-- **Room user counters** showing active participants
-- **Message delivery acknowledgments**
+### 🔥 Enhanced Features
+- **🤖 ChatGPT Integration** - AI assistant in group chats (mention @chatgpt)
+- **👁️ Read Receipts** - See who has read your messages
+- **🌙 Dark/Light Mode** - Toggle between themes with system preference detection
+- **📱 Responsive Design** - Works seamlessly on desktop and mobile
+- **🔌 Connection Status** - Real-time connection indicators
+- **⚡ Auto-reconnection** - Automatic reconnection with retry counter
+- **🎨 Modern UI** - Beautiful gradients and animations
 
-## 🛠️ Technology Stack
-
-### Backend
-- **Node.js** - Runtime environment
-- **Express.js** - Web application framework
-- **Socket.io** - Real-time bidirectional communication
-- **MongoDB** with **Mongoose** - Database and ODM
-- **JWT** - JSON Web Token authentication
-- **bcryptjs** - Password hashing
-- **Multer** - File upload handling
-- **CORS** - Cross-origin resource sharing
+## 🛠️ Tech Stack
 
 ### Frontend
-- **React** - UI library with hooks
-- **Socket.io Client** - Real-time communication
-- **Tailwind CSS** - Utility-first styling
-- **Web Notifications API** - Browser notifications
-- **File API** - File upload handling
+- **React 18** - Modern React with hooks
+- **Vite** - Lightning-fast build tool
+- **Tailwind CSS** - Utility-first CSS framework
+- **Socket.IO Client** - Real-time WebSocket client
 
-## 📦 Installation & Setup
+### Backend
+- **Node.js** - JavaScript runtime
+- **Express.js** - Web application framework
+- **Socket.IO** - Real-time bidirectional communication
+- **MongoDB** - NoSQL database
+- **Mongoose** - MongoDB object modeling
+
+### Security & Authentication
+- **JWT** - JSON Web Tokens for authentication
+- **bcryptjs** - Password hashing
+- **CORS** - Cross-Origin Resource Sharing
+
+### AI Integration
+- **OpenAI API** - ChatGPT integration for AI responses
+
+## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js (v18+ recommended)
-- MongoDB (local or cloud instance)
-- pnpm or yarn package manager
+- Node.js (v14 or higher)
+- MongoDB (local or Atlas)
+- OpenAI API key (for ChatGPT features)
 
-### Server Setup
-1. Navigate to the project directory
-2. Install server dependencies:
+### Installation
+
+1. **Clone the repository**
    ```bash
+   git clone <repository-url>
+   cd advanced-chat-app
+   ```
+
+2. **Install dependencies**
+   ```bash
+   # Install root dependencies
+   npm install
+   
+   # Install server dependencies
+   cd server
+   npm install
+   
+   # Install client dependencies
+   cd ../client
    npm install
    ```
-3. Create a `.env` file in the root directory:
+
+3. **Environment Setup**
+   ```bash
+   # In the server directory
+   cp .env.example .env
+   ```
+   
+   Edit the `.env` file with your configuration:
    ```env
-   MONGO_URI=mongodb://localhost:27017/chatapp
-   JWT_SECRET=your-super-secret-jwt-key
+   MONGO_URI=mongodb://localhost:27017/chat-app
+   JWT_SECRET=your-super-secure-jwt-secret-key-here
+   OPENAI_API_KEY=your-openai-api-key-here
    PORT=5000
-   ```
-4. Create uploads directory:
-   ```bash
-   mkdir uploads
+   NODE_ENV=development
    ```
 
-### Client Setup
-1. The client code is integrated in the same file structure
-2. Install client dependencies (if separated):
+4. **Start the application**
    ```bash
-   npm install react react-dom socket.io-client
+   # From the root directory
+   npm run dev
    ```
 
-#### Start the application (Runs both server and client)
-```bash pnpm run dev 
-```
+   This will start:
+   - Server on http://localhost:5000
+   - Client on http://localhost:5173
 
 ## 🎯 Usage
 
-### Authentication
-1. **Register**: Create a new account with username, email, and password
-2. **Login**: Access your existing account
-3. **Guest Mode**: Join quickly without registration
+### Basic Chat
+1. **Register/Login** - Create an account or join as guest
+2. **Join Room** - Select from available rooms or create new ones
+3. **Start Chatting** - Send messages, files, and reactions
+4. **Private Messages** - Click on users to start private conversations
 
-### Chat Features
-1. **Join Rooms**: Select from available rooms (general, random, tech) or create new ones
-2. **Send Messages**: Type and send real-time messages
-3. **File Sharing**: Upload and share files (images, videos, documents)
-4. **Private Chat**: Click on any user to start a private conversation
-5. **Reactions**: Add emoji reactions to messages
-6. **Search**: Search through message history
-7. **Notifications**: Enable browser notifications for new messages
-
-### Room Management
-- **Switch Rooms**: Change between different chat rooms
-- **Create Rooms**: Add new rooms for specific topics
-- **User Count**: See how many users are in each room
-- **Room History**: Access previous messages when joining
+### Advanced Features
+- **AI Assistant** - Type `@chatgpt` or mention `chatgpt` in your message
+- **Read Receipts** - Click the 👁️ icon to see who read your message
+- **Dark Mode** - Toggle with the 🌙/☀️ button
+- **File Sharing** - Use the 📎 button to attach files
+- **Message Search** - Use the search bar to find specific messages
 
 ## 🏗️ Architecture
 
-### Server Architecture
-```
-server.js
-├── Express Server Setup
-├── Socket.io Configuration
-├── MongoDB Connection
-├── User Authentication (JWT)
-├── File Upload Handling
-├── Real-time Event Handlers
-└── API Endpoints
-```
-
-### Client Architecture
-```
-ChatApp Component
-├── Authentication System
-├── Room Selection Interface
-├── Main Chat Interface
-├── Message Components
-├── File Upload System
-├── Notification System
-└── Connection Management
-```
-
 ### Database Schema
+
+**Users Collection:**
 ```javascript
-// User Schema
 {
   username: String (unique),
   email: String (unique),
   password: String (hashed),
   isOnline: Boolean,
   lastSeen: Date,
+  theme: String ('light' | 'dark'),
   createdAt: Date
 }
+```
 
-// Message Schema
+**Messages Collection:**
+```javascript
 {
   username: String,
   message: String,
   room: String,
-  type: String (text/file),
-  file: Object,
-  timestamp: Date
+  type: String ('text' | 'file' | 'ai'),
+  file: {
+    filename: String,
+    originalname: String,
+    size: Number,
+    mimetype: String,
+    url: String
+  },
+  timestamp: Date,
+  readBy: [{
+    userId: ObjectId,
+    username: String,
+    readAt: Date
+  }]
 }
 ```
 
-## 🔧 Configuration
+**Read Receipts Collection:**
+```javascript
+{
+  messageId: ObjectId,
+  userId: ObjectId,
+  username: String,
+  room: String,
+  readAt: Date
+}
+```
+
+### API Endpoints
+
+#### Authentication
+- `POST /api/register` - User registration
+- `POST /api/login` - User login
+- `POST /api/guest-login` - Guest login
+
+#### Messaging
+- `GET /api/room/:roomName/messages` - Get room messages
+- `POST /upload` - File upload
+- `GET /api/message/:messageId/receipts` - Get read receipts
+
+#### User Management
+- `GET /api/users/online` - Get online users
+- `PUT /api/user/theme` - Update user theme
+
+### Socket.IO Events
+
+#### Client → Server
+- `joinRoom` - Join a chat room
+- `createRoom` - Create new room
+- `sendMessage` - Send text message
+- `file_message` - Send file message
+- `markMessageAsRead` - Mark message as read
+- `addReaction` - Add emoji reaction
+- `privateMessage` - Send private message
+- `typing` / `stopTyping` - Typing indicators
+- `updateTheme` - Update user theme
+
+#### Server → Client
+- `message` - New message received
+- `messageRead` - Message read receipt
+- `readReceipts` - Read receipts data
+- `privateMessage` - Private message received
+- `roomJoined` - Room join confirmation
+- `roomHistory` - Room message history
+- `userList` - Online users update
+- `userTyping` / `userStoppedTyping` - Typing indicators
+- `reactionUpdate` - Reaction update
+
+## 🔧 Development
+
+### Project Structure
+```
+/
+├── client/              # React frontend
+│   ├── src/
+│   │   ├── App.jsx      # Main application component
+│   │   ├── ThemeContext.jsx  # Theme management
+│   │   └── main.jsx     # Application entry point
+│   └── package.json
+├── server/              # Node.js backend
+│   ├── models/          # Database models
+│   ├── uploads/         # File uploads
+│   ├── server.js        # Main server file
+│   └── package.json
+└── package.json         # Root package.json
+```
+
+### Key Components
+
+#### Client
+- **App.jsx** - Main application with chat interface
+- **ThemeContext.jsx** - Theme management system
+- **Responsive Design** - Mobile-first approach with Tailwind CSS
+
+#### Server
+- **server.js** - Express server with Socket.IO integration
+- **Authentication** - JWT-based auth middleware
+- **File Upload** - Multer for file handling
+- **AI Integration** - OpenAI API for ChatGPT responses
+
+## 🚀 Deployment
 
 ### Environment Variables
+Set these in your production environment:
+
 ```env
-# Database
-MONGO_URI=mongodb+srv://fidel:adminblogapp@blog-app.s9zlzrp.mongodb.net/chatapp?retryWrites=true&w=majority&appName=Blog-app
-
-
-# Authentication
-JWT_SECRET=your-jwt-secret-key
-
-# Server
+MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/chat-app
+JWT_SECRET=your-production-jwt-secret
+OPENAI_API_KEY=your-openai-api-key
 PORT=5000
-
-# Optional: File Upload Limits
-MAX_FILE_SIZE=10485760  # 10MB
+NODE_ENV=production
 ```
 
-### Socket.io Configuration
-- **CORS**: Enabled for cross-origin requests
-- **Transports**: WebSocket and polling
-- **Ping Timeout**: 60 seconds
-- **Ping Interval**: 25 seconds
+### Build Commands
+```bash
+# Build client
+cd client
+npm run build
 
-## 📱 Responsive Design
-
-The application is fully responsive and works seamlessly on:
-- **Desktop** (1024px+)
-- **Tablet** (768px - 1023px)
-- **Mobile** (320px - 767px)
-
-Key responsive features:
-- Adaptive sidebar layout
-- Touch-friendly message interface
-- Optimized file upload on mobile
-- Responsive message bubbles
-
-## 🔐 Security Features
-
-- **Password Hashing**: bcryptjs for secure password storage
-- **JWT Authentication**: Secure token-based authentication
-- **Input Validation**: Server-side validation for all inputs
-- **File Upload Security**: Type checking and size limits
-- **XSS Protection**: Sanitized message content
-- **CORS Configuration**: Controlled cross-origin access
-
-## 🚀 Performance Optimizations
-
-- **Message Pagination**: Load older messages on demand
-- **Connection Pooling**: Efficient database connections
-- **File Upload Optimization**: Chunked file uploads
-- **Memory Management**: Efficient Socket.io event handling
-- **Reconnection Logic**: Automatic connection recovery
-- **Message Caching**: In-memory message storage
-
-## 🧪 Testing
-
-### Manual Testing Checklist
-- [ ] User registration and login
-- [ ] Real-time message sending/receiving
-- [ ] File upload and sharing
-- [ ] Private messaging
-- [ ] Room creation and switching
-- [ ] Typing indicators
-- [ ] Notification system
-- [ ] Connection recovery
-- [ ] Mobile responsiveness
-
-### Test Users
-Create test accounts to verify multi-user functionality:
-1. Register multiple users
-2. Test cross-user messaging
-3. Verify notification delivery
-4. Test file sharing between users
-
-## 🌟 Future Enhancements
-
-### Potential Features
-- **Voice Messages**: Audio message support
-- **Video Calls**: WebRTC integration
-- **Message Encryption**: End-to-end encryption
-- **User Profiles**: Avatar and status customization
-- **Message Threading**: Reply to specific messages
-- **Admin Controls**: Room moderation features
-- **Dark Mode**: Theme customization
-- **Message Translation**: Multi-language support
-
-### Technical Improvements
-- **Redis Integration**: For horizontal scaling
-- **Message Queuing**: For reliable message delivery
-- **CDN Integration**: For file storage and delivery
-- **Progressive Web App**: PWA capabilities
-- **WebRTC**: For peer-to-peer communication
-- **GraphQL**: For efficient data fetching
-
-## 📄 API Documentation
-
-### Authentication Endpoints
-```
-POST /api/register     - Register new user
-POST /api/login        - User login
-POST /api/guest-login  - Guest access
-```
-
-### File Upload
-```
-POST /upload           - Upload files
-GET /uploads/:filename - Access uploaded files
-```
-
-### Chat Data
-```
-GET /api/room/:roomName/messages  - Get room history
-GET /api/users/online             - Get online users
-```
-
-### Socket.io Events
-```
-// Client to Server
-joinRoom           - Join a chat room
-sendMessage        - Send a message
-file_message       - Send file message
-typing             - Start typing
-stopTyping         - Stop typing
-addReaction        - Add message reaction
-privateMessage     - Send private message
-createRoom         - Create new room
-loadOlderMessages  - Load message history
-
-// Server to Client
-message            - New message received
-userJoined         - User joined room
-userLeft           - User left room
-userTyping         - User is typing
-userStoppedTyping  - User stopped typing
-reactionUpdate     - Message reaction update
-roomList           - Available rooms
-userList           - Online users
-roomUsers          - Room user count
+# Server runs in production mode
+cd server
+npm start
 ```
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+## 📝 License
 
-## 🙏 Acknowledgments
+This project is licensed under the MIT License.
 
-- Socket.io team for excellent real-time communication library
-- MongoDB team for robust database solution
-- React team for powerful UI library
-- Tailwind CSS for utility-first styling approach
+## 🎉 Acknowledgments
+
+- OpenAI for ChatGPT API
+- Socket.IO for real-time communication
+- MongoDB for data persistence
+- Tailwind CSS for beautiful styling
+- React team for the amazing framework
 
 ---
 
-## 📞 Support
-
-For support, please open an issue in the GitHub repository or contact the development team.
-
-**Happy Chatting! 💬✨**
+**🌟 Star this repository if you found it helpful!**
