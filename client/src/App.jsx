@@ -1,7 +1,9 @@
   import React, { useState, useEffect, useRef } from 'react';
   import { io } from 'socket.io-client';
+  import { useTheme } from './ThemeContext.jsx';
 
   const ChatApp = () => {
+    const { theme, toggleTheme, isDark } = useTheme();
     const [socket, setSocket] = useState(null);
     const [user, setUser] = useState(null);
     const [token, setToken] = useState(null);
@@ -44,6 +46,11 @@
 const [searchResults, setSearchResults] = useState([]);
 const [isSearching, setIsSearching] = useState(false);  
 const [pendingMessages, setPendingMessages] = useState(new Map());
+    const [readReceipts, setReadReceipts] = useState({});
+    const [showReadReceipts, setShowReadReceipts] = useState(false);
+    const [selectedMessageId, setSelectedMessageId] = useState(null);
+    const [showMobileMenu, setShowMobileMenu] = useState(false);
+    const [showMobileSearch, setShowMobileSearch] = useState(false);
     const scrollToBottom = () => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
@@ -313,6 +320,30 @@ const [pendingMessages, setPendingMessages] = useState(new Map());
   setReconnectAttempts(0);
 });
 
+      // Handle message read receipts
+      newSocket.on('messageRead', (data) => {
+        setReadReceipts(prev => ({
+          ...prev,
+          [data.messageId]: [...(prev[data.messageId] || []), {
+            username: data.username,
+            readAt: data.readAt
+          }]
+        }));
+      });
+
+      // Handle read receipts response
+      newSocket.on('readReceipts', (data) => {
+        setReadReceipts(prev => ({
+          ...prev,
+          [data.messageId]: data.receipts
+        }));
+      });
+
+      // Handle theme updates
+      newSocket.on('themeUpdated', (data) => {
+        // Theme is handled by ThemeContext
+      });
+
 
       return () => {
         newSocket.disconnect();
@@ -522,53 +553,178 @@ const sendMessage = () => {
       });
     };
 
+    // Mark message as read
+    const markMessageAsRead = (messageId) => {
+      if (socket && activeRoom && messageId) {
+        socket.emit('markMessageAsRead', {
+          messageId,
+          room: activeRoom
+        });
+      }
+    };
+
+    // Get read receipts for a message
+    const getReadReceipts = (messageId) => {
+      if (socket && messageId) {
+        socket.emit('getReadReceipts', { messageId });
+        setSelectedMessageId(messageId);
+        setShowReadReceipts(true);
+      }
+    };
+
+    // Handle theme change
+    const handleThemeChange = () => {
+      toggleTheme();
+      if (socket) {
+        socket.emit('updateTheme', { theme: theme === 'light' ? 'dark' : 'light' });
+      }
+    };
+
+    // Auto-mark messages as read when they come into view
+    useEffect(() => {
+      const currentMessages = getCurrentMessages();
+      if (currentMessages.length > 0) {
+        const lastMessage = currentMessages[currentMessages.length - 1];
+        if (lastMessage.id && lastMessage.username !== user?.username) {
+          markMessageAsRead(lastMessage.id);
+        }
+      }
+    }, [messages, activeRoom, activeChat]);
+
+    // Close mobile menu when screen size changes or chat changes
+    useEffect(() => {
+      const handleResize = () => {
+        if (window.innerWidth >= 768) {
+          setShowMobileMenu(false);
+        }
+      };
+      
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    // Close mobile menu when active chat changes
+    useEffect(() => {
+      setShowMobileMenu(false);
+    }, [activeChat, activeRoom]);
+
    const renderMessage = (msg, index) => {
-    const messageId = `${msg.timestamp}_${index}`;
+    const messageId = msg.id || `${msg.timestamp}_${index}`;
     const reactions = messageReactions[messageId] || {};
+    const messageReadReceipts = readReceipts[messageId] || [];
+    const isAI = msg.username === 'ChatGPT Bot' || msg.type === 'ai';
 
       if (msg.type === 'notification') {
         return (
-          <div key={index} className="flex justify-center my-2">
-            <span className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+          <div key={index} className="flex justify-center my-2 message-bubble">
+            <span className={`text-xs px-3 py-1 rounded-full ${
+              isDark ? 'text-gray-300 bg-gray-700' : 'text-gray-500 bg-gray-100'
+            }`}>
               {msg.message}
             </span>
           </div>
         );
       }
       if (msg.type === 'file') {
+        const isOwnMessage = msg.username === user?.username || msg.sender === user?.username;
+        
         return (
-          <div key={index} className="mb-4 p-3 bg-white rounded-lg shadow">
-            <div className="flex items-center justify-between mb-2">
-              <span className="font-semibold text-blue-600">{msg.username}</span>
-              <span className="text-xs text-gray-500">{formatTime(msg.timestamp)}</span>
+          <div key={index} className={`flex items-start space-x-3 message-bubble ${isOwnMessage ? 'flex-row-reverse space-x-reverse' : ''}`}>
+            {/* Avatar */}
+            <div className="flex-shrink-0">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                isOwnMessage
+                  ? 'bg-gradient-to-r from-blue-500 to-purple-600'
+                  : 'bg-gradient-to-r from-green-500 to-blue-500'
+              }`}>
+                {(msg.username || msg.sender)?.[0]?.toUpperCase()}
+              </div>
             </div>
-            <div className="bg-gray-50 p-3 rounded border">
-              <div className="flex items-center space-x-2">
-                <span className="text-2xl">📎</span>
-                <div>
-                  <p className="font-medium">{msg.file.originalname}</p>
-                  <p className="text-sm text-gray-500">{(msg.file.size / 1024).toFixed(1)} KB</p>
+            
+            {/* File Content */}
+            <div className={`flex-1 max-w-xs lg:max-w-md ${isOwnMessage ? 'text-right' : 'text-left'}`}>
+              <div className={`inline-block p-4 rounded-2xl shadow-lg ${
+                isOwnMessage 
+                  ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white' 
+                  : isDark 
+                    ? 'bg-gray-700 text-white border border-gray-600' 
+                    : 'bg-white text-gray-900 border border-gray-200'
+              }`}>
+                <div className="font-semibold text-sm mb-2">{msg.username}</div>
+                <div className={`p-3 rounded-xl ${
+                  isOwnMessage
+                    ? 'bg-white/20 border border-white/30'
+                    : isDark 
+                      ? 'bg-gray-600 border border-gray-500' 
+                      : 'bg-gray-50 border border-gray-200'
+                }`}>
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 flex items-center justify-center text-white text-xl">
+                      📎
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium">{msg.file.originalname}</p>
+                      <p className={`text-sm ${
+                        isOwnMessage 
+                          ? 'text-white/80' 
+                          : isDark 
+                            ? 'text-gray-400' 
+                            : 'text-gray-500'
+                      }`}>
+                        {(msg.file.size / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                  </div>
+                  <a 
+                    href={`http://localhost:5000${msg.file.url}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="mt-3 inline-block bg-gradient-to-r from-green-500 to-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:from-green-600 hover:to-blue-600 transition-all transform hover:scale-105"
+                  >
+                    Download
+                  </a>
+                </div>
+                <div className="text-xs opacity-75 mt-2 flex items-center justify-between">
+                  <span>{formatTime(msg.timestamp)}</span>
+                  {msg.id && messageReadReceipts.length > 0 && (
+                    <span className="flex items-center space-x-1">
+                      <span>👁️</span>
+                      <span>{messageReadReceipts.length}</span>
+                    </span>
+                  )}
                 </div>
               </div>
-              <a 
-                href={`http://localhost:5000${msg.file.url}`} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="mt-2 inline-block bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 transition-colors"
-              >
-                Download
-              </a>
-            </div>
-            <div className="flex items-center space-x-2 mt-2">
-              {['👍', '❤️', '😂', '😮', '😢', '😡'].map(emoji => (
-                <button
-                  key={emoji}
-                  onClick={() => handleReaction(messageId, emoji)}
-                  className="text-sm hover:scale-110 transition-transform"
-                >
-                  {emoji} {reactions[emoji]?.length || 0}
-                </button>
-              ))}
+              
+              {/* Reactions */}
+              <div className="flex items-center justify-between mt-2 px-2">
+                <div className="flex items-center space-x-1">
+                  {['👍', '❤️', '😂', '😮', '😢', '😡'].map(emoji => (
+                    <button
+                      key={emoji}
+                      onClick={() => handleReaction(messageId, emoji)}
+                      className={`px-2 py-1 rounded-full text-xs transition-all hover:scale-110 ${
+                        reactions[emoji]?.length > 0
+                          ? isDark 
+                            ? 'bg-gray-700 text-yellow-400' 
+                            : 'bg-gray-100 text-gray-900'
+                          : 'opacity-50 hover:opacity-100'
+                      }`}
+                    >
+                      {emoji} {reactions[emoji]?.length || 0}
+                    </button>
+                  ))}
+                </div>
+                {msg.id && (
+                  <button
+                    onClick={() => getReadReceipts(msg.id)}
+                    className={`text-xs px-2 py-1 rounded-full transition-all hover:scale-105 ${
+                      isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500 hover:bg-gray-100'
+                    }`}
+                  >
+                    👁️ {messageReadReceipts.length}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         );
@@ -576,31 +732,78 @@ const sendMessage = () => {
 
       const isOwnMessage = msg.username === user?.username || msg.sender === user?.username;
       
-      return (
-        <div key={index} className={`mb-4 ${isOwnMessage ? 'text-right' : 'text-left'}`}>
-          <div className={`inline-block max-w-xs lg:max-w-md p-3 rounded-lg ${
-            isOwnMessage 
-              ? 'bg-blue-500 text-white' 
-              : 'bg-gray-200 text-gray-800'
-          }`}>
-            <div className="font-semibold text-sm mb-1">
-              {msg.username || msg.sender}
-            </div>
-            <div className="break-words">{msg.message}</div>
-            <div className="text-xs opacity-75 mt-1">
-              {formatTime(msg.timestamp)}
+              return (
+          <div key={index} className={`flex items-start space-x-3 message-bubble ${isOwnMessage ? 'flex-row-reverse space-x-reverse' : ''}`}>
+          {/* Avatar */}
+          <div className="flex-shrink-0">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+              isAI 
+                ? 'bg-gradient-to-r from-purple-500 to-pink-500'
+                : isOwnMessage
+                  ? 'bg-gradient-to-r from-blue-500 to-purple-600'
+                  : 'bg-gradient-to-r from-green-500 to-blue-500'
+            }`}>
+              {isAI ? '🤖' : (msg.username || msg.sender)?.[0]?.toUpperCase()}
             </div>
           </div>
-          <div className="flex items-center space-x-2 mt-1 justify-center">
-            {['👍', '❤️', '😂', '😮', '😢', '😡'].map(emoji => (
-              <button
-                key={emoji}
-                onClick={() => handleReaction(messageId, emoji)}
-                className="text-sm hover:scale-110 transition-transform"
-              >
-                {emoji} {reactions[emoji]?.length || 0}
-              </button>
-            ))}
+          
+          {/* Message Content */}
+          <div className={`flex-1 max-w-xs lg:max-w-md ${isOwnMessage ? 'text-right' : 'text-left'}`}>
+            <div className={`inline-block p-4 rounded-2xl shadow-lg ${
+              isAI 
+                ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white border-2 border-purple-300'
+                : isOwnMessage 
+                  ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white' 
+                  : isDark 
+                    ? 'bg-gray-700 text-white border border-gray-600' 
+                    : 'bg-white text-gray-900 border border-gray-200'
+            }`}>
+              <div className="font-semibold text-sm mb-2 flex items-center">
+                {isAI && <span className="mr-1">🤖</span>}
+                {msg.username || msg.sender}
+              </div>
+              <div className="break-words leading-relaxed">{msg.message}</div>
+              <div className="text-xs opacity-75 mt-2 flex items-center justify-between">
+                <span>{formatTime(msg.timestamp)}</span>
+                {msg.id && messageReadReceipts.length > 0 && (
+                  <span className="flex items-center space-x-1">
+                    <span>👁️</span>
+                    <span>{messageReadReceipts.length}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+            
+            {/* Reactions */}
+            <div className="flex items-center justify-between mt-2 px-2">
+              <div className="flex items-center space-x-1">
+                {['👍', '❤️', '😂', '😮', '😢', '😡'].map(emoji => (
+                  <button
+                    key={emoji}
+                    onClick={() => handleReaction(messageId, emoji)}
+                    className={`px-2 py-1 rounded-full text-xs transition-all hover:scale-110 ${
+                      reactions[emoji]?.length > 0
+                        ? isDark 
+                          ? 'bg-gray-700 text-yellow-400' 
+                          : 'bg-gray-100 text-gray-900'
+                        : 'opacity-50 hover:opacity-100'
+                    }`}
+                  >
+                    {emoji} {reactions[emoji]?.length || 0}
+                  </button>
+                ))}
+              </div>
+              {msg.id && (
+                <button
+                  onClick={() => getReadReceipts(msg.id)}
+                  className={`text-xs px-2 py-1 rounded-full transition-all hover:scale-105 ${
+                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  👁️ {messageReadReceipts.length}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       );
@@ -609,10 +812,26 @@ const sendMessage = () => {
   // Authentication Screen
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
-        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20 w-full max-w-md">
+      <div className={`min-h-screen flex items-center justify-center p-4 ${
+        isDark 
+          ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-black'
+          : 'bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500'
+      }`}>
+        <div className={`backdrop-blur-lg rounded-2xl p-8 shadow-2xl border w-full max-w-md ${
+          isDark 
+            ? 'bg-gray-800/90 border-gray-600'
+            : 'bg-white/10 border-white/20'
+        }`}>
           <div className="text-center">
-            <h1 className="text-4xl font-bold text-white mb-2">💬 Advanced Chat</h1>
+            <div className="flex items-center justify-between mb-6">
+              <h1 className="text-4xl font-bold text-white">💬 Advanced Chat</h1>
+              <button
+                onClick={handleThemeChange}
+                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+              >
+                {isDark ? '☀️' : '🌙'}
+              </button>
+            </div>
             <p className="text-white/80 mb-8">Secure real-time messaging</p>
             
             {/* Auth Mode Selector */}
@@ -699,10 +918,26 @@ const sendMessage = () => {
     // Room Selection Screen (shown after authentication but before joining a room)
     if (isAuthenticated && !hasJoinedRoom) {
       return (
-        <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20 w-full max-w-md">
+        <div className={`min-h-screen flex items-center justify-center p-4 ${
+          isDark 
+            ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-black'
+            : 'bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500'
+        }`}>
+          <div className={`backdrop-blur-lg rounded-2xl p-8 shadow-2xl border w-full max-w-md ${
+            isDark 
+              ? 'bg-gray-800/90 border-gray-600'
+              : 'bg-white/10 border-white/20'
+          }`}>
             <div className="text-center">
-              <h1 className="text-3xl font-bold text-white mb-2">Welcome, {user?.username}!</h1>
+              <div className="flex items-center justify-between mb-6">
+                <h1 className="text-3xl font-bold text-white">Welcome, {user?.username}!</h1>
+                <button
+                  onClick={handleThemeChange}
+                  className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                >
+                  {isDark ? '☀️' : '🌙'}
+                </button>
+              </div>
               <p className="text-white/80 mb-6">Choose a room to start chatting</p>
               
               {/* Room List */}
@@ -781,20 +1016,97 @@ const sendMessage = () => {
 
     // Main Chat Interface
     return (
-      <div className="h-screen bg-gray-100 flex">
+      <div className={`h-screen flex overflow-hidden ${
+        isDark ? 'bg-gray-900' : 'bg-gray-50'
+      }`}>
+        {/* Mobile Menu Overlay */}
+        {showMobileMenu && (
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+            onClick={() => setShowMobileMenu(false)}
+          />
+        )}
+
         {/* Sidebar */}
-        <div className="w-80 bg-white shadow-lg flex flex-col">
-          {/* Header */}
-          <div className="p-4 border-b bg-gradient-to-r from-blue-500 to-purple-600 text-white">
+        <div className={`
+          ${showMobileMenu ? 'translate-x-0' : '-translate-x-full'}
+          md:translate-x-0 md:static fixed inset-y-0 left-0 z-50
+          w-80 flex flex-col transition-transform duration-300 ease-in-out
+          ${isDark ? 'bg-gray-800' : 'bg-white'}
+          shadow-xl border-r
+          ${isDark ? 'border-gray-700' : 'border-gray-200'}
+        `}>
+          {/* Sidebar Header */}
+          <div className={`p-6 border-b ${
+            isDark ? 'border-gray-700' : 'border-gray-200'
+          }`}>
             <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-lg font-bold">Advanced Chat</h1>
-                <p className="text-sm opacity-80">
-                  {user?.username} {user?.isGuest ? '(Guest)' : ''}
-                </p>
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold">
+                  {user?.username?.[0]?.toUpperCase()}
+                </div>
+                <div>
+                  <h3 className={`font-semibold ${
+                    isDark ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    {user?.username}
+                  </h3>
+                  <div className="flex items-center space-x-2 text-sm">
+                    <div className={`w-2 h-2 rounded-full ${
+                      connectionStatus === 'connected' ? 'bg-green-500' : 
+                      connectionStatus === 'reconnecting' ? 'bg-yellow-500' : 'bg-red-500'
+                    }`}></div>
+                    <span className={`${
+                      isDark ? 'text-gray-400' : 'text-gray-600'
+                    }`}>
+                      {connectionStatus === 'connected' ? 'Online' :
+                      connectionStatus === 'reconnecting' ? 'Reconnecting...' :
+                      'Offline'}
+                    </span>
+                  </div>
+                </div>
               </div>
-  
-            <div className="flex-1 max-w-md mx-4">
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setNotificationsEnabled(!notificationsEnabled)}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isDark 
+                      ? 'hover:bg-gray-700 text-gray-400 hover:text-white' 
+                      : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
+                  }`}
+                  title="Toggle notifications"
+                >
+                  {notificationsEnabled ? '🔔' : '🔕'}
+                </button>
+                <button
+                  onClick={handleThemeChange}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isDark 
+                      ? 'hover:bg-gray-700 text-gray-400 hover:text-white' 
+                      : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
+                  }`}
+                  title="Toggle theme"
+                >
+                  {isDark ? '☀️' : '🌙'}
+                </button>
+                <button
+                  onClick={logout}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isDark 
+                      ? 'hover:bg-gray-700 text-gray-400 hover:text-white' 
+                      : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
+                  }`}
+                  title="Logout"
+                >
+                  🚪
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Search */}
+          <div className="p-4">
+            <div className="relative">
               <input
                 type="text"
                 placeholder="Search messages..."
@@ -803,100 +1115,113 @@ const sendMessage = () => {
                   setSearchQuery(e.target.value);
                   searchMessages(e.target.value);
                 }}
-                className="w-full px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={`w-full px-4 py-3 rounded-xl border-2 transition-all ${
+                  isDark 
+                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:border-blue-500' 
+                    : 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-500 focus:border-blue-500'
+                } focus:outline-none focus:ring-0`}
               />
+              <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
               {searchResults.length > 0 && (
-                <div className="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto z-10">
+                <div className={`absolute top-full left-0 right-0 mt-1 rounded-xl shadow-lg max-h-60 overflow-y-auto z-10 ${
+                  isDark ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-200'
+                } border`}>
                   {searchResults.map((msg, index) => (
-                    <div key={index} className="p-2 hover:bg-gray-50 border-b">
+                    <div key={index} className={`p-3 hover:bg-gray-100 border-b ${
+                      isDark ? 'hover:bg-gray-600 border-gray-600' : 'border-gray-100'
+                    }`}>
                       <div className="text-sm font-medium">{msg.username}</div>
-                      <div className="text-sm text-gray-600">{msg.message}</div>
+                      <div className="text-sm text-gray-500">{msg.message}</div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setNotificationsEnabled(!notificationsEnabled)}
-                  className="text-white/80 hover:text-white transition-colors text-sm"
-                >
-                  {notificationsEnabled ? '🔔' : '🔕'}
-                </button>
-                <button
-                  onClick={logout}
-                  className="text-white/80 hover:text-white transition-colors"
-                >
-                  🚪
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${
-                connectionStatus === 'connected' ? 'bg-green-500' : 
-                connectionStatus === 'reconnecting' ? 'bg-yellow-500' : 'bg-red-500'
-              }`}></div>
-              <span className="text-sm text-gray-600">
-                {connectionStatus === 'connected' ? 'Connected' :
-                connectionStatus === 'reconnecting' ? `Reconnecting... (${reconnectAttempts})` :
-                connectionStatus === 'failed' ? 'Connection failed' : 'Disconnected'}
-              </span>
-            </div>
           </div>
 
-          {/* Chat Navigation */}
+          {/* Chat List */}
           <div className="flex-1 overflow-y-auto">
-            {/* Room Section */}
-            <div className="p-4 border-b">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-semibold text-gray-700">Rooms</h2>
-                <button
-                  onClick={() => setShowCreateRoom(true)}
-                  className="text-blue-500 hover:text-blue-600 text-sm"
-                >
-                  ➕
-                </button>
-              </div>
-              
-              {/* Current Room */}
-              {activeRoom && (
-                <div className="mb-2 p-2 bg-blue-50 rounded-lg border border-blue-200">
+            {/* Current Room */}
+            {activeRoom && (
+              <div className="px-4 mb-4">
+                <div className={`p-4 rounded-xl ${
+                  isDark 
+                    ? 'bg-gradient-to-r from-blue-900/30 to-purple-900/30 border border-blue-800' 
+                    : 'bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200'
+                }`}>
                   <div className="flex items-center justify-between">
-                    <div className="font-medium text-blue-700">#{activeRoom}</div>
-                    <div className="text-sm text-blue-600">
-                      {roomUsers[activeRoom] || 0} users
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold">
+                        #
+                      </div>
+                      <div>
+                        <h3 className={`font-semibold ${
+                          isDark ? 'text-blue-300' : 'text-blue-700'
+                        }`}>
+                          #{activeRoom}
+                        </h3>
+                        <p className={`text-sm ${
+                          isDark ? 'text-blue-400' : 'text-blue-600'
+                        }`}>
+                          {roomUsers[activeRoom] || 0} users online
+                        </p>
+                      </div>
                     </div>
+                    <button
+                      onClick={() => setHasJoinedRoom(false)}
+                      className={`p-2 rounded-lg transition-colors ${
+                        isDark 
+                          ? 'hover:bg-blue-800/50 text-blue-400' 
+                          : 'hover:bg-blue-100 text-blue-600'
+                      }`}
+                      title="Switch room"
+                    >
+                      🔄
+                    </button>
                   </div>
                 </div>
-              )}
-
-              {/* Switch Room */}
-              <button
-                onClick={() => setHasJoinedRoom(false)}
-                className="w-full p-2 text-left text-sm text-gray-600 hover:bg-gray-50 rounded"
-              >
-                🔄 Switch Room
-              </button>
-            </div>
+              </div>
+            )}
 
             {/* Private Chats */}
-            <div className="p-4 border-b">
-              <h2 className="font-semibold text-gray-700 mb-3">Private Chats</h2>
-              <div className="space-y-1">
+            <div className="px-4 mb-4">
+              <h2 className={`text-sm font-semibold mb-3 ${
+                isDark ? 'text-gray-400' : 'text-gray-600'
+              }`}>
+                PRIVATE CHATS
+              </h2>
+              <div className="space-y-2">
                 {privateChats.map((chat) => (
                   <button
                     key={chat}
                     onClick={() => setActiveChat(chat)}
-                    className={`w-full p-2 text-left rounded transition-colors ${
+                    className={`w-full p-3 rounded-xl transition-all text-left ${
                       activeChat === chat
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'hover:bg-gray-50'
+                        ? isDark 
+                          ? 'bg-gradient-to-r from-blue-900/50 to-purple-900/50 border border-blue-700' 
+                          : 'bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200'
+                        : isDark
+                          ? 'hover:bg-gray-700 border border-transparent'
+                          : 'hover:bg-gray-50 border border-transparent'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span>{chat}</span>
+                      <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-green-500 to-blue-500 flex items-center justify-center text-white font-bold text-sm">
+                          {chat[0]?.toUpperCase()}
+                        </div>
+                        <span className={`font-medium ${
+                          isDark ? 'text-white' : 'text-gray-900'
+                        }`}>
+                          {chat}
+                        </span>
+                      </div>
                       {unreadCounts[chat] > 0 && (
-                        <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1">
+                        <span className="bg-gradient-to-r from-red-500 to-pink-500 text-white text-xs rounded-full px-2 py-1 font-medium">
                           {unreadCounts[chat]}
                         </span>
                       )}
@@ -907,25 +1232,40 @@ const sendMessage = () => {
             </div>
 
             {/* Online Users */}
-            <div className="p-4">
-              <h2 className="font-semibold text-gray-700 mb-3">
-                Online Users ({onlineUsers.length})
+            <div className="px-4 mb-4">
+              <h2 className={`text-sm font-semibold mb-3 ${
+                isDark ? 'text-gray-400' : 'text-gray-600'
+              }`}>
+                ONLINE USERS ({onlineUsers.length})
               </h2>
               <div className="space-y-2">
                 {onlineUsers.map((username) => (
                   <div
                     key={username}
-                    className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer"
+                    className={`flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all ${
+                      isDark 
+                        ? 'hover:bg-gray-700' 
+                        : 'hover:bg-gray-50'
+                    }`}
                     onClick={() => startPrivateChat(username)}
                   >
-                    <div className="flex items-center space-x-2">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      <span className={username === user?.username ? 'font-semibold' : ''}>
+                    <div className="flex items-center space-x-3">
+                      <div className="relative">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-green-500 to-blue-500 flex items-center justify-center text-white font-bold text-sm">
+                          {username[0]?.toUpperCase()}
+                        </div>
+                        <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
+                      </div>
+                      <span className={`font-medium ${
+                        username === user?.username ? 'font-bold' : ''
+                      } ${
+                        isDark ? 'text-white' : 'text-gray-900'
+                      }`}>
                         {username}
                       </span>
                     </div>
                     {username !== user?.username && (
-                      <button className="text-blue-500 hover:text-blue-600 text-sm">
+                      <button className="p-2 rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white hover:from-blue-600 hover:to-purple-700 transition-all">
                         💬
                       </button>
                     )}
@@ -938,34 +1278,126 @@ const sendMessage = () => {
 
         {/* Main Chat Area */}
         <div className="flex-1 flex flex-col">
-          {/* Chat Header */}
-          <div className="p-4 border-b bg-white">
+          {/* Mobile Header */}
+          <div className={`md:hidden p-4 border-b ${
+            isDark 
+              ? 'bg-gray-800 border-gray-700' 
+              : 'bg-white border-gray-200'
+          }`}>
             <div className="flex items-center justify-between">
-              <div>
-                <h2 className="font-semibold text-gray-800">
-                  {activeChat === 'global' ? `#${activeRoom}` : `Chat with ${activeChat}`}
-                </h2>
-                {activeChat === 'global' && (
-                  <p className="text-sm text-gray-600">
-                    {roomUsers[activeRoom] || 0} users online
-                  </p>
-                )}
-              </div>
               <button
-                onClick={() => setActiveChat('global')}
-                className={`px-3 py-1 rounded text-sm ${
-                  activeChat === 'global'
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                onClick={() => setShowMobileMenu(!showMobileMenu)}
+                className={`p-2 rounded-lg ${
+                  isDark 
+                    ? 'hover:bg-gray-700 text-gray-400' 
+                    : 'hover:bg-gray-100 text-gray-600'
                 }`}
               >
-                Back to Room
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
               </button>
+              <h1 className={`font-bold text-lg ${
+                isDark ? 'text-white' : 'text-gray-900'
+              }`}>
+                ChatFlow
+              </h1>
+              <div className="w-10"></div>
             </div>
           </div>
 
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Welcome Screen */}
+          {!activeRoom && activeChat === 'global' && (
+            <div className={`flex-1 flex flex-col items-center justify-center ${
+              isDark ? 'bg-gray-900' : 'bg-gray-50'
+            }`}>
+              <div className="text-center p-8">
+                <div className="w-24 h-24 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white text-4xl mb-6 mx-auto animate-pulse">
+                  💬
+                </div>
+                <h2 className={`text-2xl font-bold mb-4 ${
+                  isDark ? 'text-white' : 'text-gray-900'
+                }`}>
+                  Welcome to ChatFlow
+                </h2>
+                <p className={`text-lg mb-6 ${
+                  isDark ? 'text-gray-400' : 'text-gray-600'
+                }`}>
+                  Select a room or start a private chat to begin messaging
+                </p>
+                <button
+                  onClick={() => setHasJoinedRoom(false)}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-600 hover:to-purple-700 transition-all transform hover:scale-105 shadow-lg"
+                >
+                  Join a Room
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Chat Container */}
+          {(activeRoom || activeChat !== 'global') && (
+            <>
+              {/* Chat Header */}
+              <div className={`p-6 border-b ${
+                isDark 
+                  ? 'bg-gray-800 border-gray-700' 
+                  : 'bg-white border-gray-200'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg">
+                      {activeChat === 'global' ? '#' : activeChat[0]?.toUpperCase()}
+                    </div>
+                    <div>
+                      <h2 className={`text-xl font-bold ${
+                        isDark ? 'text-white' : 'text-gray-900'
+                      }`}>
+                        {activeChat === 'global' ? `#${activeRoom}` : activeChat}
+                      </h2>
+                      <p className={`text-sm ${
+                        isDark ? 'text-gray-400' : 'text-gray-600'
+                      }`}>
+                        {activeChat === 'global' 
+                          ? `${roomUsers[activeRoom] || 0} users online`
+                          : 'Private conversation'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {activeChat !== 'global' && (
+                      <button
+                        onClick={() => setActiveChat('global')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                          isDark
+                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Back to Room
+                      </button>
+                    )}
+                    <button
+                      className={`p-2 rounded-lg transition-colors ${
+                        isDark 
+                          ? 'hover:bg-gray-700 text-gray-400' 
+                          : 'hover:bg-gray-100 text-gray-600'
+                      }`}
+                      title="More options"
+                    >
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Messages */}
+              <div className={`flex-1 overflow-y-auto p-6 ${
+                isDark ? 'bg-gray-900' : 'bg-gray-50'
+              }`} style={{ scrollBehavior: 'smooth' }}>
             {hasMoreMessages && (
               <div className="text-center py-2">
                 <button
@@ -977,53 +1409,144 @@ const sendMessage = () => {
                 </button>
               </div>
             )}
-            {getCurrentMessages().map((msg, index) => renderMessage(msg, index))}
-            
-            {/* Typing Indicator */}
-            {getCurrentTypingUsers().length > 0 && (
-              <div className="text-sm text-gray-500 italic">
-                {getCurrentTypingUsers().join(', ')} {getCurrentTypingUsers().length === 1 ? 'is' : 'are'} typing...
+                <div className="space-y-4">
+                  {getCurrentMessages().map((msg, index) => renderMessage(msg, index))}
+                </div>
+                
+                {/* Typing Indicator */}
+                {getCurrentTypingUsers().length > 0 && (
+                  <div className={`flex items-center space-x-3 p-4 ${
+                    isDark ? 'text-gray-400' : 'text-gray-500'
+                  }`}>
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-r from-green-500 to-blue-500 flex items-center justify-center text-white font-bold text-xs">
+                      T
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-sm font-medium">
+                        {getCurrentTypingUsers().join(', ')} {getCurrentTypingUsers().length === 1 ? 'is' : 'are'} typing
+                      </span>
+                      <div className="flex space-x-1">
+                        <div className="w-2 h-2 bg-current rounded-full animate-bounce"></div>
+                        <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                        <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                <div ref={messagesEndRef} />
               </div>
-            )}
-            
-            <div ref={messagesEndRef} />
-          </div>
 
-          {/* Message Input */}
-          <div className="p-4 border-t bg-white">
-            <div className="flex items-center space-x-2">
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileSelect}
-                className="hidden"
-                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="p-2 text-gray-500 hover:text-gray-700 disabled:opacity-50"
-              >
-                {uploading ? '⏳' : '📎'}
-              </button>
-              <input
-                type="text"
-                value={message}
-                onChange={handleTyping}
-                onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                placeholder={`Message ${activeChat === 'global' ? `#${activeRoom}` : activeChat}`}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <button
-                onClick={sendMessage}
-                disabled={!message.trim()}
-                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Send
-              </button>
+              {/* Message Input */}
+              <div className={`p-6 border-t ${
+                isDark 
+                  ? 'bg-gray-800 border-gray-700' 
+                  : 'bg-white border-gray-200'
+              }`}>
+                <div className="flex items-end space-x-4">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileSelect}
+                    className="hidden"
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className={`p-3 rounded-full transition-all ${
+                      isDark 
+                        ? 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-white' 
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    title="Attach file"
+                  >
+                    {uploading ? '⏳' : '📎'}
+                  </button>
+                  <div className="flex-1">
+                    <textarea
+                      value={message}
+                      onChange={handleTyping}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage();
+                        }
+                      }}
+                      placeholder={`Message ${activeChat === 'global' ? `#${activeRoom}` : activeChat}... (mention @chatgpt for AI)`}
+                      className={`w-full px-4 py-3 border-2 rounded-xl transition-all resize-none ${
+                        isDark 
+                          ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:border-blue-500' 
+                          : 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-500 focus:border-blue-500'
+                      } focus:outline-none focus:ring-0`}
+                      rows={1}
+                      style={{ minHeight: '50px', maxHeight: '120px' }}
+                      onInput={(e) => {
+                        e.target.style.height = 'auto';
+                        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                      }}
+                    />
+                  </div>
+                  <button
+                    onClick={sendMessage}
+                    disabled={!message.trim()}
+                    className="p-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-full hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-110 shadow-lg"
+                    title="Send message"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Read Receipts Modal */}
+        {showReadReceipts && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className={`p-6 rounded-lg shadow-xl max-w-md w-full m-4 ${
+              isDark ? 'bg-gray-800' : 'bg-white'
+            }`}>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className={`text-lg font-semibold ${
+                  isDark ? 'text-gray-200' : 'text-gray-800'
+                }`}>
+                  Read by ({readReceipts[selectedMessageId]?.length || 0})
+                </h3>
+                <button
+                  onClick={() => setShowReadReceipts(false)}
+                  className={`text-gray-400 hover:text-gray-600 ${
+                    isDark ? 'hover:text-gray-200' : ''
+                  }`}
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {readReceipts[selectedMessageId]?.map((receipt, index) => (
+                  <div key={index} className={`flex items-center justify-between py-2 ${
+                    isDark ? 'text-gray-300' : 'text-gray-700'
+                  }`}>
+                    <span>{receipt.username}</span>
+                    <span className={`text-xs ${
+                      isDark ? 'text-gray-400' : 'text-gray-500'
+                    }`}>
+                      {formatTime(receipt.readAt)}
+                    </span>
+                  </div>
+                )) || (
+                  <p className={`text-center py-4 ${
+                    isDark ? 'text-gray-400' : 'text-gray-500'
+                  }`}>
+                    No read receipts yet
+                  </p>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }
