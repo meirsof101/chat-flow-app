@@ -1,7 +1,9 @@
   import React, { useState, useEffect, useRef } from 'react';
   import { io } from 'socket.io-client';
+  import { useTheme } from './ThemeContext.jsx';
 
   const ChatApp = () => {
+    const { theme, toggleTheme, isDark } = useTheme();
     const [socket, setSocket] = useState(null);
     const [user, setUser] = useState(null);
     const [token, setToken] = useState(null);
@@ -44,6 +46,9 @@
 const [searchResults, setSearchResults] = useState([]);
 const [isSearching, setIsSearching] = useState(false);  
 const [pendingMessages, setPendingMessages] = useState(new Map());
+    const [readReceipts, setReadReceipts] = useState({});
+    const [showReadReceipts, setShowReadReceipts] = useState(false);
+    const [selectedMessageId, setSelectedMessageId] = useState(null);
     const scrollToBottom = () => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
@@ -313,6 +318,30 @@ const [pendingMessages, setPendingMessages] = useState(new Map());
   setReconnectAttempts(0);
 });
 
+      // Handle message read receipts
+      newSocket.on('messageRead', (data) => {
+        setReadReceipts(prev => ({
+          ...prev,
+          [data.messageId]: [...(prev[data.messageId] || []), {
+            username: data.username,
+            readAt: data.readAt
+          }]
+        }));
+      });
+
+      // Handle read receipts response
+      newSocket.on('readReceipts', (data) => {
+        setReadReceipts(prev => ({
+          ...prev,
+          [data.messageId]: data.receipts
+        }));
+      });
+
+      // Handle theme updates
+      newSocket.on('themeUpdated', (data) => {
+        // Theme is handled by ThemeContext
+      });
+
 
       return () => {
         newSocket.disconnect();
@@ -522,14 +551,56 @@ const sendMessage = () => {
       });
     };
 
+    // Mark message as read
+    const markMessageAsRead = (messageId) => {
+      if (socket && activeRoom && messageId) {
+        socket.emit('markMessageAsRead', {
+          messageId,
+          room: activeRoom
+        });
+      }
+    };
+
+    // Get read receipts for a message
+    const getReadReceipts = (messageId) => {
+      if (socket && messageId) {
+        socket.emit('getReadReceipts', { messageId });
+        setSelectedMessageId(messageId);
+        setShowReadReceipts(true);
+      }
+    };
+
+    // Handle theme change
+    const handleThemeChange = () => {
+      toggleTheme();
+      if (socket) {
+        socket.emit('updateTheme', { theme: theme === 'light' ? 'dark' : 'light' });
+      }
+    };
+
+    // Auto-mark messages as read when they come into view
+    useEffect(() => {
+      const currentMessages = getCurrentMessages();
+      if (currentMessages.length > 0) {
+        const lastMessage = currentMessages[currentMessages.length - 1];
+        if (lastMessage.id && lastMessage.username !== user?.username) {
+          markMessageAsRead(lastMessage.id);
+        }
+      }
+    }, [messages, activeRoom, activeChat]);
+
    const renderMessage = (msg, index) => {
-    const messageId = `${msg.timestamp}_${index}`;
+    const messageId = msg.id || `${msg.timestamp}_${index}`;
     const reactions = messageReactions[messageId] || {};
+    const messageReadReceipts = readReceipts[messageId] || [];
+    const isAI = msg.username === 'ChatGPT Bot' || msg.type === 'ai';
 
       if (msg.type === 'notification') {
         return (
           <div key={index} className="flex justify-center my-2">
-            <span className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+            <span className={`text-xs px-3 py-1 rounded-full ${
+              isDark ? 'text-gray-300 bg-gray-700' : 'text-gray-500 bg-gray-100'
+            }`}>
               {msg.message}
             </span>
           </div>
@@ -537,17 +608,25 @@ const sendMessage = () => {
       }
       if (msg.type === 'file') {
         return (
-          <div key={index} className="mb-4 p-3 bg-white rounded-lg shadow">
+          <div key={index} className={`mb-4 p-3 rounded-lg shadow ${
+            isDark ? 'bg-gray-800 text-white' : 'bg-white text-black'
+          }`}>
             <div className="flex items-center justify-between mb-2">
-              <span className="font-semibold text-blue-600">{msg.username}</span>
-              <span className="text-xs text-gray-500">{formatTime(msg.timestamp)}</span>
+              <span className="font-semibold text-blue-400">{msg.username}</span>
+              <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                {formatTime(msg.timestamp)}
+              </span>
             </div>
-            <div className="bg-gray-50 p-3 rounded border">
+            <div className={`p-3 rounded border ${
+              isDark ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'
+            }`}>
               <div className="flex items-center space-x-2">
                 <span className="text-2xl">📎</span>
                 <div>
                   <p className="font-medium">{msg.file.originalname}</p>
-                  <p className="text-sm text-gray-500">{(msg.file.size / 1024).toFixed(1)} KB</p>
+                  <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                    {(msg.file.size / 1024).toFixed(1)} KB
+                  </p>
                 </div>
               </div>
               <a 
@@ -559,16 +638,28 @@ const sendMessage = () => {
                 Download
               </a>
             </div>
-            <div className="flex items-center space-x-2 mt-2">
-              {['👍', '❤️', '😂', '😮', '😢', '😡'].map(emoji => (
+            <div className="flex items-center justify-between mt-2">
+              <div className="flex items-center space-x-2">
+                {['👍', '❤️', '😂', '😮', '😢', '😡'].map(emoji => (
+                  <button
+                    key={emoji}
+                    onClick={() => handleReaction(messageId, emoji)}
+                    className="text-sm hover:scale-110 transition-transform"
+                  >
+                    {emoji} {reactions[emoji]?.length || 0}
+                  </button>
+                ))}
+              </div>
+              {msg.id && (
                 <button
-                  key={emoji}
-                  onClick={() => handleReaction(messageId, emoji)}
-                  className="text-sm hover:scale-110 transition-transform"
+                  onClick={() => getReadReceipts(msg.id)}
+                  className={`text-xs px-2 py-1 rounded ${
+                    isDark ? 'text-gray-400 hover:bg-gray-600' : 'text-gray-500 hover:bg-gray-100'
+                  }`}
                 >
-                  {emoji} {reactions[emoji]?.length || 0}
+                  👁️ {messageReadReceipts.length}
                 </button>
-              ))}
+              )}
             </div>
           </div>
         );
@@ -579,28 +670,51 @@ const sendMessage = () => {
       return (
         <div key={index} className={`mb-4 ${isOwnMessage ? 'text-right' : 'text-left'}`}>
           <div className={`inline-block max-w-xs lg:max-w-md p-3 rounded-lg ${
-            isOwnMessage 
-              ? 'bg-blue-500 text-white' 
-              : 'bg-gray-200 text-gray-800'
+            isAI 
+              ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white border-2 border-purple-300'
+              : isOwnMessage 
+                ? 'bg-blue-500 text-white' 
+                : isDark 
+                  ? 'bg-gray-700 text-white' 
+                  : 'bg-gray-200 text-gray-800'
           }`}>
-            <div className="font-semibold text-sm mb-1">
+            <div className="font-semibold text-sm mb-1 flex items-center">
+              {isAI && <span className="mr-1">🤖</span>}
               {msg.username || msg.sender}
             </div>
             <div className="break-words">{msg.message}</div>
-            <div className="text-xs opacity-75 mt-1">
-              {formatTime(msg.timestamp)}
+            <div className="text-xs opacity-75 mt-1 flex items-center justify-between">
+              <span>{formatTime(msg.timestamp)}</span>
+              {msg.id && messageReadReceipts.length > 0 && (
+                <span className="flex items-center space-x-1">
+                  <span>👁️</span>
+                  <span>{messageReadReceipts.length}</span>
+                </span>
+              )}
             </div>
           </div>
-          <div className="flex items-center space-x-2 mt-1 justify-center">
-            {['👍', '❤️', '😂', '😮', '😢', '😡'].map(emoji => (
+          <div className="flex items-center justify-between mt-1">
+            <div className="flex items-center space-x-2">
+              {['👍', '❤️', '😂', '😮', '😢', '😡'].map(emoji => (
+                <button
+                  key={emoji}
+                  onClick={() => handleReaction(messageId, emoji)}
+                  className="text-sm hover:scale-110 transition-transform"
+                >
+                  {emoji} {reactions[emoji]?.length || 0}
+                </button>
+              ))}
+            </div>
+            {msg.id && (
               <button
-                key={emoji}
-                onClick={() => handleReaction(messageId, emoji)}
-                className="text-sm hover:scale-110 transition-transform"
+                onClick={() => getReadReceipts(msg.id)}
+                className={`text-xs px-2 py-1 rounded ${
+                  isDark ? 'text-gray-400 hover:bg-gray-600' : 'text-gray-500 hover:bg-gray-100'
+                }`}
               >
-                {emoji} {reactions[emoji]?.length || 0}
+                👁️ {messageReadReceipts.length}
               </button>
-            ))}
+            )}
           </div>
         </div>
       );
@@ -609,10 +723,26 @@ const sendMessage = () => {
   // Authentication Screen
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
-        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20 w-full max-w-md">
+      <div className={`min-h-screen flex items-center justify-center p-4 ${
+        isDark 
+          ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-black'
+          : 'bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500'
+      }`}>
+        <div className={`backdrop-blur-lg rounded-2xl p-8 shadow-2xl border w-full max-w-md ${
+          isDark 
+            ? 'bg-gray-800/90 border-gray-600'
+            : 'bg-white/10 border-white/20'
+        }`}>
           <div className="text-center">
-            <h1 className="text-4xl font-bold text-white mb-2">💬 Advanced Chat</h1>
+            <div className="flex items-center justify-between mb-6">
+              <h1 className="text-4xl font-bold text-white">💬 Advanced Chat</h1>
+              <button
+                onClick={handleThemeChange}
+                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+              >
+                {isDark ? '☀️' : '🌙'}
+              </button>
+            </div>
             <p className="text-white/80 mb-8">Secure real-time messaging</p>
             
             {/* Auth Mode Selector */}
@@ -699,10 +829,26 @@ const sendMessage = () => {
     // Room Selection Screen (shown after authentication but before joining a room)
     if (isAuthenticated && !hasJoinedRoom) {
       return (
-        <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20 w-full max-w-md">
+        <div className={`min-h-screen flex items-center justify-center p-4 ${
+          isDark 
+            ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-black'
+            : 'bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500'
+        }`}>
+          <div className={`backdrop-blur-lg rounded-2xl p-8 shadow-2xl border w-full max-w-md ${
+            isDark 
+              ? 'bg-gray-800/90 border-gray-600'
+              : 'bg-white/10 border-white/20'
+          }`}>
             <div className="text-center">
-              <h1 className="text-3xl font-bold text-white mb-2">Welcome, {user?.username}!</h1>
+              <div className="flex items-center justify-between mb-6">
+                <h1 className="text-3xl font-bold text-white">Welcome, {user?.username}!</h1>
+                <button
+                  onClick={handleThemeChange}
+                  className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                >
+                  {isDark ? '☀️' : '🌙'}
+                </button>
+              </div>
               <p className="text-white/80 mb-6">Choose a room to start chatting</p>
               
               {/* Room List */}
@@ -781,11 +927,19 @@ const sendMessage = () => {
 
     // Main Chat Interface
     return (
-      <div className="h-screen bg-gray-100 flex">
+      <div className={`h-screen flex ${
+        isDark ? 'bg-gray-900' : 'bg-gray-100'
+      }`}>
         {/* Sidebar */}
-        <div className="w-80 bg-white shadow-lg flex flex-col">
+        <div className={`w-80 shadow-lg flex flex-col ${
+          isDark ? 'bg-gray-800' : 'bg-white'
+        }`}>
           {/* Header */}
-          <div className="p-4 border-b bg-gradient-to-r from-blue-500 to-purple-600 text-white">
+          <div className={`p-4 border-b text-white ${
+            isDark 
+              ? 'bg-gradient-to-r from-gray-700 to-gray-600 border-gray-600'
+              : 'bg-gradient-to-r from-blue-500 to-purple-600 border-gray-200'
+          }`}>
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-lg font-bold">Advanced Chat</h1>
@@ -824,6 +978,12 @@ const sendMessage = () => {
                   {notificationsEnabled ? '🔔' : '🔕'}
                 </button>
                 <button
+                  onClick={handleThemeChange}
+                  className="text-white/80 hover:text-white transition-colors"
+                >
+                  {isDark ? '☀️' : '🌙'}
+                </button>
+                <button
                   onClick={logout}
                   className="text-white/80 hover:text-white transition-colors"
                 >
@@ -836,7 +996,9 @@ const sendMessage = () => {
                 connectionStatus === 'connected' ? 'bg-green-500' : 
                 connectionStatus === 'reconnecting' ? 'bg-yellow-500' : 'bg-red-500'
               }`}></div>
-              <span className="text-sm text-gray-600">
+              <span className={`text-sm ${
+                isDark ? 'text-gray-300' : 'text-gray-600'
+              }`}>
                 {connectionStatus === 'connected' ? 'Connected' :
                 connectionStatus === 'reconnecting' ? `Reconnecting... (${reconnectAttempts})` :
                 connectionStatus === 'failed' ? 'Connection failed' : 'Disconnected'}
@@ -847,12 +1009,16 @@ const sendMessage = () => {
           {/* Chat Navigation */}
           <div className="flex-1 overflow-y-auto">
             {/* Room Section */}
-            <div className="p-4 border-b">
+            <div className={`p-4 border-b ${
+              isDark ? 'border-gray-600' : 'border-gray-200'
+            }`}>
               <div className="flex items-center justify-between mb-3">
-                <h2 className="font-semibold text-gray-700">Rooms</h2>
+                <h2 className={`font-semibold ${
+                  isDark ? 'text-gray-200' : 'text-gray-700'
+                }`}>Rooms</h2>
                 <button
                   onClick={() => setShowCreateRoom(true)}
-                  className="text-blue-500 hover:text-blue-600 text-sm"
+                  className="text-blue-400 hover:text-blue-500 text-sm"
                 >
                   ➕
                 </button>
@@ -860,10 +1026,18 @@ const sendMessage = () => {
               
               {/* Current Room */}
               {activeRoom && (
-                <div className="mb-2 p-2 bg-blue-50 rounded-lg border border-blue-200">
+                <div className={`mb-2 p-2 rounded-lg border ${
+                  isDark 
+                    ? 'bg-blue-900/50 border-blue-700' 
+                    : 'bg-blue-50 border-blue-200'
+                }`}>
                   <div className="flex items-center justify-between">
-                    <div className="font-medium text-blue-700">#{activeRoom}</div>
-                    <div className="text-sm text-blue-600">
+                    <div className={`font-medium ${
+                      isDark ? 'text-blue-300' : 'text-blue-700'
+                    }`}>#{activeRoom}</div>
+                    <div className={`text-sm ${
+                      isDark ? 'text-blue-400' : 'text-blue-600'
+                    }`}>
                       {roomUsers[activeRoom] || 0} users
                     </div>
                   </div>
@@ -873,15 +1047,23 @@ const sendMessage = () => {
               {/* Switch Room */}
               <button
                 onClick={() => setHasJoinedRoom(false)}
-                className="w-full p-2 text-left text-sm text-gray-600 hover:bg-gray-50 rounded"
+                className={`w-full p-2 text-left text-sm rounded ${
+                  isDark 
+                    ? 'text-gray-300 hover:bg-gray-700' 
+                    : 'text-gray-600 hover:bg-gray-50'
+                }`}
               >
                 🔄 Switch Room
               </button>
             </div>
 
             {/* Private Chats */}
-            <div className="p-4 border-b">
-              <h2 className="font-semibold text-gray-700 mb-3">Private Chats</h2>
+            <div className={`p-4 border-b ${
+              isDark ? 'border-gray-600' : 'border-gray-200'
+            }`}>
+              <h2 className={`font-semibold mb-3 ${
+                isDark ? 'text-gray-200' : 'text-gray-700'
+              }`}>Private Chats</h2>
               <div className="space-y-1">
                 {privateChats.map((chat) => (
                   <button
@@ -889,8 +1071,12 @@ const sendMessage = () => {
                     onClick={() => setActiveChat(chat)}
                     className={`w-full p-2 text-left rounded transition-colors ${
                       activeChat === chat
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'hover:bg-gray-50'
+                        ? isDark 
+                          ? 'bg-blue-900/50 text-blue-300'
+                          : 'bg-blue-100 text-blue-700'
+                        : isDark
+                          ? 'hover:bg-gray-700 text-gray-300'
+                          : 'hover:bg-gray-50 text-gray-800'
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -908,24 +1094,34 @@ const sendMessage = () => {
 
             {/* Online Users */}
             <div className="p-4">
-              <h2 className="font-semibold text-gray-700 mb-3">
+              <h2 className={`font-semibold mb-3 ${
+                isDark ? 'text-gray-200' : 'text-gray-700'
+              }`}>
                 Online Users ({onlineUsers.length})
               </h2>
               <div className="space-y-2">
                 {onlineUsers.map((username) => (
                   <div
                     key={username}
-                    className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer"
+                    className={`flex items-center justify-between p-2 rounded cursor-pointer ${
+                      isDark 
+                        ? 'hover:bg-gray-700' 
+                        : 'hover:bg-gray-50'
+                    }`}
                     onClick={() => startPrivateChat(username)}
                   >
                     <div className="flex items-center space-x-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      <span className={username === user?.username ? 'font-semibold' : ''}>
+                      <span className={`${
+                        username === user?.username ? 'font-semibold' : ''
+                      } ${
+                        isDark ? 'text-gray-300' : 'text-gray-800'
+                      }`}>
                         {username}
                       </span>
                     </div>
                     {username !== user?.username && (
-                      <button className="text-blue-500 hover:text-blue-600 text-sm">
+                      <button className="text-blue-400 hover:text-blue-500 text-sm">
                         💬
                       </button>
                     )}
@@ -939,14 +1135,22 @@ const sendMessage = () => {
         {/* Main Chat Area */}
         <div className="flex-1 flex flex-col">
           {/* Chat Header */}
-          <div className="p-4 border-b bg-white">
+          <div className={`p-4 border-b ${
+            isDark 
+              ? 'bg-gray-800 border-gray-600' 
+              : 'bg-white border-gray-200'
+          }`}>
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="font-semibold text-gray-800">
+                <h2 className={`font-semibold ${
+                  isDark ? 'text-gray-200' : 'text-gray-800'
+                }`}>
                   {activeChat === 'global' ? `#${activeRoom}` : `Chat with ${activeChat}`}
                 </h2>
                 {activeChat === 'global' && (
-                  <p className="text-sm text-gray-600">
+                  <p className={`text-sm ${
+                    isDark ? 'text-gray-400' : 'text-gray-600'
+                  }`}>
                     {roomUsers[activeRoom] || 0} users online
                   </p>
                 )}
@@ -956,7 +1160,9 @@ const sendMessage = () => {
                 className={`px-3 py-1 rounded text-sm ${
                   activeChat === 'global'
                     ? 'bg-blue-500 text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    : isDark
+                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                 }`}
               >
                 Back to Room
@@ -965,7 +1171,9 @@ const sendMessage = () => {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${
+            isDark ? 'bg-gray-900' : 'bg-white'
+          }`}>
             {hasMoreMessages && (
               <div className="text-center py-2">
                 <button
@@ -981,7 +1189,9 @@ const sendMessage = () => {
             
             {/* Typing Indicator */}
             {getCurrentTypingUsers().length > 0 && (
-              <div className="text-sm text-gray-500 italic">
+              <div className={`text-sm italic ${
+                isDark ? 'text-gray-400' : 'text-gray-500'
+              }`}>
                 {getCurrentTypingUsers().join(', ')} {getCurrentTypingUsers().length === 1 ? 'is' : 'are'} typing...
               </div>
             )}
@@ -990,7 +1200,11 @@ const sendMessage = () => {
           </div>
 
           {/* Message Input */}
-          <div className="p-4 border-t bg-white">
+          <div className={`p-4 border-t ${
+            isDark 
+              ? 'bg-gray-800 border-gray-600' 
+              : 'bg-white border-gray-200'
+          }`}>
             <div className="flex items-center space-x-2">
               <input
                 type="file"
@@ -1002,7 +1216,11 @@ const sendMessage = () => {
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className="p-2 text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                className={`p-2 disabled:opacity-50 ${
+                  isDark 
+                    ? 'text-gray-400 hover:text-gray-200' 
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
               >
                 {uploading ? '⏳' : '📎'}
               </button>
@@ -1011,8 +1229,12 @@ const sendMessage = () => {
                 value={message}
                 onChange={handleTyping}
                 onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                placeholder={`Message ${activeChat === 'global' ? `#${activeRoom}` : activeChat}`}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder={`Message ${activeChat === 'global' ? `#${activeRoom}` : activeChat} (mention @chatgpt for AI)`}
+                className={`flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  isDark 
+                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                }`}
               />
               <button
                 onClick={sendMessage}
@@ -1024,6 +1246,51 @@ const sendMessage = () => {
             </div>
           </div>
         </div>
+
+        {/* Read Receipts Modal */}
+        {showReadReceipts && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className={`p-6 rounded-lg shadow-xl max-w-md w-full m-4 ${
+              isDark ? 'bg-gray-800' : 'bg-white'
+            }`}>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className={`text-lg font-semibold ${
+                  isDark ? 'text-gray-200' : 'text-gray-800'
+                }`}>
+                  Read by ({readReceipts[selectedMessageId]?.length || 0})
+                </h3>
+                <button
+                  onClick={() => setShowReadReceipts(false)}
+                  className={`text-gray-400 hover:text-gray-600 ${
+                    isDark ? 'hover:text-gray-200' : ''
+                  }`}
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {readReceipts[selectedMessageId]?.map((receipt, index) => (
+                  <div key={index} className={`flex items-center justify-between py-2 ${
+                    isDark ? 'text-gray-300' : 'text-gray-700'
+                  }`}>
+                    <span>{receipt.username}</span>
+                    <span className={`text-xs ${
+                      isDark ? 'text-gray-400' : 'text-gray-500'
+                    }`}>
+                      {formatTime(receipt.readAt)}
+                    </span>
+                  </div>
+                )) || (
+                  <p className={`text-center py-4 ${
+                    isDark ? 'text-gray-400' : 'text-gray-500'
+                  }`}>
+                    No read receipts yet
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
