@@ -1,4 +1,4 @@
-  import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
   import { io } from 'socket.io-client';
   import { useTheme } from './ThemeContext.jsx';
 
@@ -911,7 +911,6 @@ const sendMessage = () => {
               </div>
             </div>
           </div>
-
           {/* Search */}
           <div className="p-4">
             <div className="relative">
@@ -976,7 +975,6 @@ const sendMessage = () => {
               </span>
             </div>
           </div>
-
           {/* Chat List */}
           <div className="flex-1 overflow-y-auto">
             {/* Room Section */}
@@ -1011,7 +1009,6 @@ const sendMessage = () => {
                 🔄 Switch Room
               </button>
             </div>
-
             {/* Private Chats */}
             <div className="p-4 border-b">
               <h2 className="font-semibold text-gray-700 mb-3">Private Chats</h2>
@@ -1047,7 +1044,6 @@ const sendMessage = () => {
                 ))}
               </div>
             </div>
-
             {/* Online Users */}
             <div className="p-4">
               <h2 className="font-semibold text-gray-700 mb-3">
@@ -1076,15 +1072,12 @@ const sendMessage = () => {
               </div>
             </div>
           </div>
-        </div>
-      );
-    }
-
-    {/* Main Chat Area */}
-    <div className="flex-1 flex flex-col">
-      {/* Chat Header */}
-      <div className="p-4 border-b bg-white">
-        <div className="flex items-center justify-between">
+    
+         {/* Main Chat Area */}
+        <div className="flex-1 flex flex-col">
+        {/* Chat Header */}
+        <div className="p-4 border-b bg-white">
+          <div className="flex items-center justify-between">
               <div>
                 <h2 className="font-semibold text-gray-800">
                   {activeChat === 'global' ? `#${activeRoom}` : `Chat with ${activeChat}`}
@@ -1191,18 +1184,20 @@ const sendMessage = () => {
                 </button>
               </div>
               <div className="max-h-64 overflow-y-auto">
-                {readReceipts[selectedMessageId]?.map((receipt, index) => (
-                  <div key={index} className={`flex items-center justify-between py-2 ${
-                    isDark ? 'text-gray-300' : 'text-gray-700'
-                  }`}>
-                    <span>{receipt.username}</span>
-                    <span className={`text-xs ${
-                      isDark ? 'text-gray-400' : 'text-gray-500'
+                {readReceipts[selectedMessageId]?.length > 0 ? (
+                  readReceipts[selectedMessageId].map((receipt, index) => (
+                    <div key={index} className={`flex items-center justify-between py-2 ${
+                      isDark ? 'text-gray-300' : 'text-gray-700'
                     }`}>
-                      {formatTime(receipt.readAt)}
-                    </span>
-                  </div>
-                )) || (
+                      <span>{receipt.username}</span>
+                      <span className={`text-xs ${
+                        isDark ? 'text-gray-400' : 'text-gray-500'
+                      }`}>
+                        {formatTime(receipt.readAt)}
+                      </span>
+                    </div>
+                  ))
+                ) : (
                   <p className={`text-center py-4 ${
                     isDark ? 'text-gray-400' : 'text-gray-500'
                   }`}>
@@ -1212,7 +1207,9 @@ const sendMessage = () => {
               </div>
             </div>
           </div>
-        )};
-
-
+        )}
+        
+      </div>
+    )
+  }
 export default ChatApp;
