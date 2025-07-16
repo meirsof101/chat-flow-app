@@ -1,15 +1,17 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    outDir: 'dist',
+  },
   server: {
     host: 'localhost',
     port: 5173,
     proxy: {
       '/upload': {
-        target: 'http://localhost:5000',
+        target: 'https://week-5-web-sockets-assignment-meirsof101.onrender.com',
         changeOrigin: true,
         secure: false,
       }
