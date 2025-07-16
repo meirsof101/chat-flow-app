@@ -174,6 +174,7 @@ const generateAIResponse = async (message, context = []) => {
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, '../client')));
 
 // In-memory storage for active connections
 const connectedUsers = new Map();
@@ -212,7 +213,10 @@ const upload = multer({
     }
   }
 });
-
+// Root route
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../client', 'index.html'));
+});
 // API Endpoints
 
 // User Registration
